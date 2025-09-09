@@ -46,10 +46,13 @@ def parse_attributes(info_string: str) -> Dict[str, str]:
         return attrs
     
     parts = info_string.split()
-    if not parts or parts[0] != 'python':
+    if not parts or (parts[0] != 'python' and parts[0] != '```python'):
         return attrs
     
-    for part in parts[1:]:
+    # Skip the first part (either 'python' or '```python')
+    start_idx = 1
+    
+    for part in parts[start_idx:]:
         if '=' in part:
             key, value = part.split('=', 1)
             attrs[key] = value
@@ -120,7 +123,7 @@ def parse_markdown(content: str) -> tuple[DocumentConfig, List[CodeCell]]:
         # Look for Python code fence
         if line.startswith('```python'):
             line_start = i + 1
-            attrs = parse_attributes(line[3:])  # Remove ```
+            attrs = parse_attributes(line)  # Full line for parsing
             
             # Find the end of the code block
             code_lines = []
@@ -157,6 +160,12 @@ def parse_markdown(content: str) -> tuple[DocumentConfig, List[CodeCell]]:
                 # Parse collapse attributes
                 collapse_code = attrs.get('collapse-code', '').lower() == 'true'
                 collapse_output = attrs.get('collapse-output', '').lower() == 'true'
+                
+                # Parse collapsed attribute (convenience parameter that sets both)
+                if 'collapsed' in attrs:
+                    collapsed_value = attrs.get('collapsed', '').lower() == 'true'
+                    collapse_code = collapsed_value
+                    collapse_output = collapsed_value
                 
                 cell = CodeCell(
                     id=cell_id,

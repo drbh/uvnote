@@ -310,6 +310,34 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             opacity: 0.8;
         }
         
+        /* Slide functionality */
+        .minimap, .file-explorer, .tools-widget {
+            transition: transform 0.3s ease;
+        }
+        .minimap.slide-off, .file-explorer.slide-off, .tools-widget.slide-off {
+            transform: translateX(calc(100% - 20px));
+        }
+        .minimap-title::before, .file-explorer-title::before, .tools-title::before {
+            content: '‹';
+            float: left;
+            cursor: pointer;
+            color: var(--text-secondary);
+            user-select: none;
+            margin-right: 8px;
+        }
+        .minimap-title::after, .file-explorer-title::after, .tools-title::after {
+            content: '›';
+            float: right;
+            cursor: pointer;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+        .minimap.slide-off .minimap-title::after,
+        .file-explorer.slide-off .file-explorer-title::after,
+        .tools-widget.slide-off .tools-title::after {
+            content: '‹';
+        }
+
         /* Hide widgets on smaller screens */
         @media (max-width: 768px) {
             .minimap, .file-explorer, .tools-widget {
@@ -503,7 +531,115 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         /* Cursor for tools */
         body[data-tool="arrow"] .main-content { cursor: crosshair; }
+        body[data-tool="pen"] .main-content { cursor: pointer; }
         body[data-tool="eraser"] .main-content { cursor: cell; }
+
+        /* Color picker styles */
+        .tools-section-title {
+            font-weight: bold;
+            color: var(--text-secondary);
+            font-size: 0.65rem;
+            margin: 0.75rem 0 0.5rem 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .color-row {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .color-swatch {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border-primary);
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .color-swatch:hover {
+            transform: scale(1.1);
+            border-color: var(--text-secondary);
+        }
+        .color-swatch.selected {
+            border-color: var(--text-primary);
+            box-shadow: 0 0 0 2px var(--text-link);
+        }
+        .color-swatch.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 1px 1px 1px black;
+        }
+        .color-input {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border-primary);
+            border-radius: 3px;
+            cursor: pointer;
+            background: none;
+            padding: 0;
+            grid-column: span 2;
+            justify-self: center;
+        }
+        .color-input:hover {
+            border-color: var(--text-secondary);
+        }
+        
+        /* Thickness slider styles */
+        .thickness-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .thickness-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: var(--border-primary);
+            border-radius: 2px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        .thickness-slider:hover {
+            opacity: 1;
+        }
+        .thickness-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--text-link);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .thickness-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            background: var(--text-link);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+        .thickness-value {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            min-width: 20px;
+            text-align: right;
+        }
+
+        .highlight {
+            background: none !important;
+        }
     </style>
     <script>
         // --- Drag utilities ---
@@ -531,6 +667,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     localStorage.setItem(storageKey, JSON.stringify({ left, top }));
                 }
             } catch (_) {}
+        }
+
+        function addSlideToggle(widget, titleEl) {
+            titleEl.onclick = function(e) {
+                const rect = titleEl.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                
+                // Left arrow (always slides back on screen)
+                if (clickX < 30) {
+                    widget.classList.remove('slide-off');
+                    e.stopPropagation();
+                }
+                // Right arrow (always slides off screen)
+                else if (clickX > rect.width - 30) {
+                    widget.classList.add('slide-off');
+                    e.stopPropagation();
+                }
+            };
         }
 
         function makeDraggable(el, storageKey, handleEl) {
@@ -570,18 +724,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             };
 
             const startDrag = (e) => {
+                // Check if click is on arrow areas - if so, don't start drag
+                if (handleEl) {
+                    const rect = handleEl.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    if (clickX < 30 || clickX > rect.width - 30) {
+                        return; // Don't start drag on arrow areas
+                    }
+                }
+                
                 // Start from element's current on-screen rect
-                const rect = el.getBoundingClientRect();
-                el.style.left = rect.left + 'px';
-                el.style.top = rect.top + 'px';
+                const elRect = el.getBoundingClientRect();
+                el.style.left = elRect.left + 'px';
+                el.style.top = elRect.top + 'px';
                 el.style.right = 'auto';
                 el.style.bottom = 'auto';
 
                 dragging = true;
                 startX = e.touches ? e.touches[0].clientX : e.clientX;
                 startY = e.touches ? e.touches[0].clientY : e.clientY;
-                origLeft = rect.left;
-                origTop = rect.top;
+                origLeft = elRect.left;
+                origTop = elRect.top;
 
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', endDrag);
@@ -668,20 +831,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function resetLayout() {
             try {
-                const keys = [
-                    'uvnote-theme',
-                    'uvnote-minimap-pos',
-                    'uvnote-file-explorer-pos',
-                    'uvnote-tools-pos',
-                    'uvnote-active-tool',
-                    'uvnote-arrow-color',
-                    'uvnote-shapes',
-                    // legacy keys
-                    'uvnote-panels',
-                    'uvnote-shapes-two-left',
-                    'uvnote-shapes-single'
-                ];
-                keys.forEach(k => localStorage.removeItem(k));
+                // Clear all uvnote-* keys
+                const allKeys = Object.keys(localStorage);
+                const uvnoteKeys = allKeys.filter(key => key.startsWith('uvnote-'));
+                uvnoteKeys.forEach(k => localStorage.removeItem(k));
             } catch (_) {}
             // Reload to reinitialize UI with defaults
             location.reload();
@@ -764,9 +917,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Generate minimap content
             const minimap = createMinimap();
             document.body.appendChild(minimap);
-            // Make draggable (use title as handle)
+            // Make draggable and slideable (use title as handle)
             const mTitle = minimap.querySelector('.minimap-title');
             makeDraggable(minimap, 'uvnote-minimap-pos', mTitle);
+            addSlideToggle(minimap, mTitle);
 
             // Attach scroll listener to window (two-panel removed)
             _minimapScrollContainer = window;
@@ -800,6 +954,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Generate file explorer content
             const fileExplorer = createFileExplorer();
             document.body.appendChild(fileExplorer);
+            const title = fileExplorer.querySelector('.file-explorer-title');
+            addSlideToggle(fileExplorer, title);
         }
         
         function createMinimap() {
@@ -1001,12 +1157,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function getArrowColor() {
             const saved = localStorage.getItem('uvnote-arrow-color');
             if (saved) return saved;
-            const fallback = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#333';
-            return fallback;
+            return '#e53935'; // Default red color
         }
 
         function setStoredArrowColor(color) {
             try { localStorage.setItem('uvnote-arrow-color', color); } catch (_) {}
+        }
+
+        function getLineThickness() {
+            const saved = localStorage.getItem('uvnote-line-thickness');
+            if (saved) return parseInt(saved, 10);
+            return 4; // default thickness
+        }
+
+        function setStoredLineThickness(thickness) {
+            try { localStorage.setItem('uvnote-line-thickness', thickness); } catch (_) {}
         }
 
         function createToolsWidget() {
@@ -1038,6 +1203,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }
             };
             row.appendChild(arrowBtn);
+
+            // Pen tool
+            const penBtn = document.createElement('div');
+            penBtn.className = 'tool-button';
+            penBtn.textContent = 'pen';
+            penBtn.onclick = function() {
+                const isActive = penBtn.classList.contains('active');
+                if (isActive) {
+                    penBtn.classList.remove('active');
+                    setActiveTool('none');
+                } else {
+                    tools.querySelectorAll('.tool-button').forEach(b => b.classList.remove('active'));
+                    penBtn.classList.add('active');
+                    setActiveTool('pen');
+                }
+            };
+            row.appendChild(penBtn);
 
             // Eraser tool
             const eraseBtn = document.createElement('div');
@@ -1072,6 +1254,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (saved === 'arrow') {
                 arrowBtn.classList.add('active');
                 setActiveTool('arrow');
+            } else if (saved === 'pen') {
+                penBtn.classList.add('active');
+                setActiveTool('pen');
             } else if (saved === 'eraser') {
                 eraseBtn.classList.add('active');
                 setActiveTool('eraser');
@@ -1087,7 +1272,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             colorRow.className = 'tools-row color-row';
             tools.appendChild(colorRow);
 
-            const swatchColors = ['#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#000000', '#ffffff'];
+            const swatchColors = [
+                // Primary colors
+                '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa',
+                // Additional useful colors  
+                '#ff5722', '#795548', '#607d8b', '#9c27b0',
+                // Grayscale
+                '#000000', '#424242', '#9e9e9e', '#ffffff'
+            ];
             const swatches = [];
             swatchColors.forEach(c => {
                 const s = document.createElement('div');
@@ -1112,19 +1304,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             colorRow.appendChild(colorInput);
 
             function refreshColorUI(selected) {
-                swatches.forEach(s => {
-                    const sCol = s.style.backgroundColor;
-                    const norm = (val) => {
-                        const tmp = document.createElement('div');
-                        tmp.style.color = val;
-                        document.body.appendChild(tmp);
-                        const out = getComputedStyle(tmp).color;
-                        tmp.remove();
-                        return out;
-                    };
-                    if (norm(sCol) === norm(selected)) s.classList.add('selected'); else s.classList.remove('selected');
+                const selectedHex = selected.startsWith('#') ? selected.toLowerCase() : rgbToHex(selected);
+                
+                swatches.forEach((s, i) => {
+                    const swatchHex = swatchColors[i].toLowerCase();
+                    if (swatchHex === selectedHex) {
+                        s.classList.add('selected');
+                    } else {
+                        s.classList.remove('selected');
+                    }
                 });
-                try { colorInput.value = selected.startsWith('#') ? selected : rgbToHex(selected); } catch (_) {}
+                
+                try { 
+                    colorInput.value = selectedHex; 
+                } catch (_) {}
             }
 
             function rgbToHex(rgb) {
@@ -1139,6 +1332,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Restore color selection
             refreshColorUI(getArrowColor());
 
+            // Thickness slider
+            const thicknessTitle = document.createElement('div');
+            thicknessTitle.className = 'tools-section-title';
+            thicknessTitle.textContent = 'thickness';
+            tools.appendChild(thicknessTitle);
+
+            const thicknessRow = document.createElement('div');
+            thicknessRow.className = 'thickness-row';
+            tools.appendChild(thicknessRow);
+
+            const thicknessSlider = document.createElement('input');
+            thicknessSlider.type = 'range';
+            thicknessSlider.className = 'thickness-slider';
+            thicknessSlider.min = '1';
+            thicknessSlider.max = '10';
+            thicknessSlider.value = getLineThickness();
+            
+            const thicknessValue = document.createElement('span');
+            thicknessValue.className = 'thickness-value';
+            thicknessValue.textContent = thicknessSlider.value + 'px';
+
+            thicknessSlider.oninput = function() {
+                const value = parseInt(thicknessSlider.value, 10);
+                setStoredLineThickness(value);
+                thicknessValue.textContent = value + 'px';
+            };
+
+            thicknessRow.appendChild(thicknessSlider);
+            thicknessRow.appendChild(thicknessValue);
+
             // Draggable behavior
             makeDraggable(tools, 'uvnote-tools-pos', title);
 
@@ -1148,6 +1371,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function initTools() {
             const widget = createToolsWidget();
             document.body.appendChild(widget);
+            const title = widget.querySelector('.tools-title');
+            addSlideToggle(widget, title);
         }
 
         function teardownTools() {
@@ -1164,6 +1389,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let _overlayScrollHandler = null;
         let _drawing = null; // current in-progress arrow {x1,y1,x2,y2}
         let _shapes = []; // committed shapes for current mode
+        let _fadeTimer = null; // timer for fade animation
 
         function getOverlayStorageKey() { return 'uvnote-shapes'; }
 
@@ -1176,6 +1402,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function saveShapes() {
             try { localStorage.setItem(getOverlayStorageKey(), JSON.stringify(_shapes)); } catch (_) {}
+        }
+
+        function updateShapesFade() {
+            const now = Date.now();
+            const fadeStartTime = 3000; // Start fading after 3 seconds
+            const fadeEndTime = 5000; // Fully gone after 5 seconds
+            let needsUpdate = false;
+
+            for (let i = _shapes.length - 1; i >= 0; i--) {
+                const shape = _shapes[i];
+                if (!shape.createdAt) continue; // Skip old shapes without timestamps
+                
+                const age = now - shape.createdAt;
+                
+                if (age >= fadeEndTime) {
+                    // Remove completely faded shapes
+                    _shapes.splice(i, 1);
+                    needsUpdate = true;
+                } else if (age >= fadeStartTime) {
+                    // Update opacity for fading shapes
+                    const fadeProgress = (age - fadeStartTime) / (fadeEndTime - fadeStartTime);
+                    const newOpacity = 1 - fadeProgress;
+                    if (Math.abs(shape.opacity - newOpacity) > 0.01) {
+                        shape.opacity = newOpacity;
+                        needsUpdate = true;
+                    }
+                }
+            }
+
+            if (needsUpdate) {
+                saveShapes();
+                renderOverlay();
+            }
         }
 
         function getContentContainer() { return window; }
@@ -1220,8 +1479,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const tool = document.body.dataset.tool;
             if (tool === 'arrow') {
                 startDrawArrow(e);
+            } else if (tool === 'pen') {
+                startDrawPen(e);
             } else if (tool === 'eraser') {
                 eraseAt(e);
+            }
+        }
+
+        function onPointerMove(e) {
+            if (!_drawing) return;
+            if (_drawing.type === 'pen') {
+                moveDrawPen(e);
+            } else {
+                moveDrawArrow(e);
+            }
+        }
+
+        function onPointerUp(e) {
+            if (!_drawing) return;
+            if (_drawing.type === 'pen') {
+                endDrawPen();
+            } else {
+                endDrawArrow();
             }
         }
 
@@ -1234,7 +1513,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 x2: pt.x + containerScrollLeft(),
                 y2: pt.y + containerScrollTop(),
                 color: getArrowColor(),
-                width: 2
+                width: getLineThickness()
             };
             renderOverlay();
             e.preventDefault();
@@ -1251,7 +1530,53 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function endDrawArrow() {
             if (!_drawing) return;
-            _shapes.push({ type: 'arrow', ..._drawing });
+            _shapes.push({ 
+                type: 'arrow', 
+                ..._drawing,
+                createdAt: Date.now(),
+                opacity: 1.0
+            });
+            _drawing = null;
+            saveShapes();
+            renderOverlay();
+        }
+
+        function startDrawPen(e) {
+            if (document.body.dataset.tool !== 'pen') return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _drawing = {
+                type: 'pen',
+                points: [{
+                    x: pt.x + containerScrollLeft(),
+                    y: pt.y + containerScrollTop()
+                }],
+                color: getArrowColor(),
+                width: getLineThickness()
+            };
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function moveDrawPen(e) {
+            if (!_drawing || _drawing.type !== 'pen') return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _drawing.points.push({
+                x: pt.x + containerScrollLeft(),
+                y: pt.y + containerScrollTop()
+            });
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function endDrawPen() {
+            if (!_drawing || _drawing.type !== 'pen') return;
+            if (_drawing.points.length > 1) {
+                _shapes.push({ 
+                    ..._drawing,
+                    createdAt: Date.now(),
+                    opacity: 1.0
+                });
+            }
             _drawing = null;
             saveShapes();
             renderOverlay();
@@ -1280,34 +1605,88 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         renderOverlay();
                         break;
                     }
+                } else if (s.type === 'pen' && s.points) {
+                    // Check if click is near any line segment in the pen stroke
+                    let minDist = Infinity;
+                    for (let j = 1; j < s.points.length; j++) {
+                        const d = distPointToSegment(x, y, s.points[j-1].x, s.points[j-1].y, s.points[j].x, s.points[j].y);
+                        minDist = Math.min(minDist, d);
+                    }
+                    if (minDist <= threshold) {
+                        _shapes.splice(i, 1);
+                        saveShapes();
+                        renderOverlay();
+                        break;
+                    }
                 }
             }
             e.preventDefault();
         }
 
-        function drawArrow(ctx, x1, y1, x2, y2, color, width) {
-            // Draw line
+        function drawArrow(ctx, x1, y1, x2, y2, color, width, opacity = 1.0) {
+            // Set opacity
+            const oldAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = opacity;
+            
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
             ctx.lineWidth = width;
             ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Calculate arrow geometry
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const headLength = Math.min(15 + width * 1.5, 25); // Cap the max head size
+            const headAngle = Math.PI / 6; // 30 degrees
+            
+            // Calculate where the line should end (before the arrowhead)
+            const lineEndX = x2 - headLength * 0.8 * Math.cos(angle);
+            const lineEndY = y2 - headLength * 0.8 * Math.sin(angle);
+            
+            // Draw the line
             ctx.beginPath();
             ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
+            ctx.lineTo(lineEndX, lineEndY);
             ctx.stroke();
-            // Arrowhead
-            const headLen = 10 + width * 2;
-            const angle = Math.atan2(y2 - y1, x2 - x1);
-            const hx1 = x2 - headLen * Math.cos(angle - Math.PI / 6);
-            const hy1 = y2 - headLen * Math.sin(angle - Math.PI / 6);
-            const hx2 = x2 - headLen * Math.cos(angle + Math.PI / 6);
-            const hy2 = y2 - headLen * Math.sin(angle + Math.PI / 6);
+            
+            // Calculate arrowhead points
+            const hx1 = x2 - headLength * Math.cos(angle - headAngle);
+            const hy1 = y2 - headLength * Math.sin(angle - headAngle);
+            const hx2 = x2 - headLength * Math.cos(angle + headAngle);
+            const hy2 = y2 - headLength * Math.sin(angle + headAngle);
+            
+            // Draw arrowhead
             ctx.beginPath();
             ctx.moveTo(x2, y2);
             ctx.lineTo(hx1, hy1);
             ctx.lineTo(hx2, hy2);
             ctx.closePath();
             ctx.fill();
+            
+            // Restore opacity
+            ctx.globalAlpha = oldAlpha;
+        }
+
+        function drawPen(ctx, points, color, width, offX, offY, opacity = 1.0) {
+            if (!points || points.length < 2) return;
+            
+            // Set opacity
+            const oldAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = opacity;
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(points[0].x - offX, points[0].y - offY);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x - offX, points[i].y - offY);
+            }
+            ctx.stroke();
+            
+            // Restore opacity
+            ctx.globalAlpha = oldAlpha;
         }
 
         function renderOverlay() {
@@ -1317,13 +1696,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const offY = containerScrollTop();
             // Draw committed shapes for current mode
             for (const s of _shapes) {
+                const opacity = s.opacity !== undefined ? s.opacity : 1.0;
                 if (s.type === 'arrow') {
-                    drawArrow(_overlayCtx, s.x1 - offX, s.y1 - offY, s.x2 - offX, s.y2 - offY, s.color || '#f00', s.width || 2);
+                    drawArrow(_overlayCtx, s.x1 - offX, s.y1 - offY, s.x2 - offX, s.y2 - offY, s.color || '#f00', s.width || 2, opacity);
+                } else if (s.type === 'pen') {
+                    drawPen(_overlayCtx, s.points, s.color || '#f00', s.width || 2, offX, offY, opacity);
                 }
             }
             // Draw current drawing
             if (_drawing) {
-                drawArrow(_overlayCtx, _drawing.x1 - offX, _drawing.y1 - offY, _drawing.x2 - offX, _drawing.y2 - offY, _drawing.color, _drawing.width);
+                if (_drawing.type === 'pen') {
+                    drawPen(_overlayCtx, _drawing.points, _drawing.color, _drawing.width, offX, offY);
+                } else {
+                    drawArrow(_overlayCtx, _drawing.x1 - offX, _drawing.y1 - offY, _drawing.x2 - offX, _drawing.y2 - offY, _drawing.color, _drawing.width);
+                }
             }
         }
 
@@ -1347,17 +1733,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             // Events
             _overlay.addEventListener('mousedown', onPointerDown);
-            _overlay.addEventListener('mousemove', moveDrawArrow);
-            document.addEventListener('mouseup', endDrawArrow);
+            _overlay.addEventListener('mousemove', onPointerMove);
+            document.addEventListener('mouseup', onPointerUp);
             _overlay.addEventListener('touchstart', onPointerDown, { passive: false });
-            _overlay.addEventListener('touchmove', moveDrawArrow, { passive: false });
-            document.addEventListener('touchend', endDrawArrow);
+            _overlay.addEventListener('touchmove', onPointerMove, { passive: false });
+            document.addEventListener('touchend', onPointerUp);
 
             _overlayResizeHandler = () => updateOverlayBounds();
             window.addEventListener('resize', _overlayResizeHandler);
 
             _overlayScrollHandler = () => renderOverlay();
             window.addEventListener('scroll', _overlayScrollHandler);
+            
+            // Start fade animation timer
+            _fadeTimer = setInterval(updateShapesFade, 100); // Update every 100ms for smooth fade
         }
 
         function rebindOverlayContainer() {
@@ -1375,11 +1764,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function teardownOverlay() {
             if (!_overlay) return;
             _overlay.removeEventListener('mousedown', onPointerDown);
-            _overlay.removeEventListener('mousemove', moveDrawArrow);
-            document.removeEventListener('mouseup', endDrawArrow);
+            _overlay.removeEventListener('mousemove', onPointerMove);
+            document.removeEventListener('mouseup', onPointerUp);
             _overlay.removeEventListener('touchstart', onPointerDown);
-            _overlay.removeEventListener('touchmove', moveDrawArrow);
-            document.removeEventListener('touchend', endDrawArrow);
+            _overlay.removeEventListener('touchmove', onPointerMove);
+            document.removeEventListener('touchend', onPointerUp);
             if (_overlayResizeHandler) window.removeEventListener('resize', _overlayResizeHandler);
             if (_overlayScrollHandler) {
                 if (_overlayContainer === window) {
@@ -1387,6 +1776,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 } else if (_overlayContainer) {
                     _overlayContainer.removeEventListener('scroll', _overlayScrollHandler);
                 }
+            }
+            if (_fadeTimer) {
+                clearInterval(_fadeTimer);
+                _fadeTimer = null;
             }
             if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
             _overlay = null; _overlayCtx = null; _overlayContainer = null; _overlayResizeHandler = null; _overlayScrollHandler = null; _drawing = null;
