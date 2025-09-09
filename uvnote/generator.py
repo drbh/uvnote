@@ -1,0 +1,1615 @@
+"""Static HTML output generator."""
+
+import html
+import shutil
+from pathlib import Path
+from typing import List
+
+import markdown
+from jinja2 import Environment, BaseLoader
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import PythonLexer
+
+from .executor import ExecutionResult
+from .parser import CodeCell, DocumentConfig
+
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script>
+        // Apply theme immediately to prevent flicker
+        (function() {
+            const configTheme = '{{ config.theme }}';
+            let theme;
+            if (configTheme === 'auto') {
+                theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            } else {
+                theme = localStorage.getItem('uvnote-theme') || configTheme;
+            }
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+    <style>
+        :root[data-theme="light"] {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f6f8fa;
+            --bg-tertiary: #f8f9fa;
+            --bg-code: #f8f9fa;
+            --bg-error: #fdf2f2;
+            --bg-artifact: #e6f3ff;
+            --bg-artifact-hover: #d0e7ff;
+            
+            --text-primary: #333;
+            --text-secondary: #656d76;
+            --text-error: #c53030;
+            --text-link: #0969da;
+            
+            --border-primary: #e1e5e9;
+            --border-error: #e53e3e;
+            --border-cell-failed: #d73a49;
+            
+            --shadow: rgba(0, 0, 0, 0.1);
+        }
+        
+        :root[data-theme="dark"] {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #121212;
+            --bg-tertiary: #181818;
+            --bg-code: #0d0d0d;
+            --bg-error: #1a0f0f;
+            --bg-artifact: #151515;
+            --bg-artifact-hover: #1a1a1a;
+            
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+            --text-error: #ff6b6b;
+            --text-link: #64b5f6;
+            
+            --border-primary: #2a2a2a;
+            --border-error: #ff6b6b;
+            --border-cell-failed: #ff6b6b;
+            
+            --shadow: rgba(255, 255, 255, 0.05);
+        }
+        body {
+            font-family: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Monaco, 'Consolas', monospace;
+            line-height: 1.4;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 15px;
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        
+        /* Two panel layout removed */
+        
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 0.5rem;
+            z-index: 1000;
+        }
+        
+        .theme-toggle, .reset-toggle {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            padding: 0.4rem 0.6rem;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            user-select: none;
+            transition: all 0.2s ease;
+            text-transform: lowercase;
+            letter-spacing: 0;
+        }
+        
+        .theme-toggle:hover, .reset-toggle:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--text-secondary);
+            color: var(--text-primary);
+        }
+        
+        .minimap {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 220px;
+            max-height: 400px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            padding: 0.5rem;
+            font-size: 0.7rem;
+            overflow-y: auto;
+            z-index: 100;
+            opacity: 0.9;
+            transition: opacity 0.2s ease;
+        }
+        
+        .file-explorer {
+            position: fixed;
+            bottom: 20px; /* default; JS will stack */
+            right: 20px;
+            left: auto;
+            top: auto;
+            width: 220px;
+            max-height: 400px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            padding: 0.5rem;
+            font-size: 0.7rem;
+            overflow-y: auto;
+            z-index: 100;
+            opacity: 0.9;
+            transition: opacity 0.2s ease;
+        }
+
+        /* Drawing overlay */
+        .draw-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 80; /* under widgets (100) and controls (1000) */
+            display: block;
+            pointer-events: none; /* enabled only when a tool is active */
+        }
+
+        /* Tools widget */
+        .tools-widget {
+            position: fixed;
+            bottom: 20px; /* default; JS will stack */
+            right: 20px;
+            left: auto;
+            top: auto;
+            width: 220px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            padding: 0.5rem;
+            font-size: 0.7rem;
+            z-index: 100;
+            opacity: 0.95;
+        }
+        .tools-title {
+            font-weight: bold;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border-primary);
+            cursor: grab;
+            user-select: none;
+        }
+        .tools-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .tool-button {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            padding: 0.25rem 0.4rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.75rem;
+            user-select: none;
+        }
+        .tool-button:hover { color: var(--text-primary); }
+        .tool-button.active { color: var(--text-primary); border-color: var(--text-secondary); background: var(--bg-secondary); }
+        
+        .minimap:hover, .file-explorer:hover {
+            opacity: 1;
+        }
+        
+        .minimap-title {
+            font-weight: bold;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border-primary);
+            cursor: grab; /* drag handle */
+            user-select: none;
+        }
+        
+        .minimap-item {
+            display: block;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.15rem 0;
+            border-left: 2px solid transparent;
+            padding-left: 0.5rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .minimap-item:hover {
+            color: var(--text-primary);
+            border-left-color: var(--text-secondary);
+        }
+        
+        .minimap-item.active {
+            color: var(--text-primary);
+            border-left-color: var(--text-link);
+        }
+        
+        .minimap-heading {
+            font-weight: normal;
+        }
+        
+        .minimap-heading.h1 { padding-left: 0.5rem; }
+        .minimap-heading.h2 { padding-left: 1rem; }
+        .minimap-heading.h3 { padding-left: 1.5rem; }
+        .minimap-heading.h4 { padding-left: 2rem; }
+        .minimap-heading.h5 { padding-left: 2.5rem; }
+        .minimap-heading.h6 { padding-left: 3rem; }
+        
+        .minimap-cell {
+            color: var(--text-link);
+            opacity: 0.8;
+            font-style: italic;
+        }
+        
+        .minimap-cell:hover {
+            opacity: 1;
+        }
+        
+        .file-explorer-title {
+            font-weight: bold;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border-primary);
+            cursor: grab; /* drag handle */
+            user-select: none;
+        }
+        
+        .file-explorer-section {
+            margin-bottom: 0.75rem;
+        }
+        
+        .file-explorer-section-title {
+            font-weight: bold;
+            color: var(--text-secondary);
+            font-size: 0.65rem;
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .file-explorer-item {
+            display: block;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.1rem 0;
+            margin-left: 0.5rem;
+            transition: color 0.2s ease;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        
+        .file-explorer-item:hover {
+            color: var(--text-primary);
+        }
+        
+        .file-explorer-item.script {
+            color: var(--text-link);
+        }
+        
+        .file-explorer-item.artifact {
+            color: var(--text-secondary);
+            opacity: 0.8;
+        }
+        
+        /* Hide widgets on smaller screens */
+        @media (max-width: 768px) {
+            .minimap, .file-explorer, .tools-widget {
+                display: none;
+            }
+        }
+        
+        .cell {
+            margin: 1rem 0;
+            border: 1px solid var(--border-primary);
+            border-radius: 2px;
+            overflow: hidden;
+            background: var(--bg-secondary);
+        }
+        .cell-header {
+            background: var(--bg-secondary);
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease;
+        }
+        .cell-header:hover {
+            background: var(--bg-tertiary);
+        }
+        .collapse-indicators {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+        .collapse-indicators span:hover {
+            color: var(--text-primary);
+            opacity: 1;
+        }
+        .cell-code {
+            display: block;
+            background: var(--bg-code);
+        }
+        .cell-code.collapsed {
+            display: none;
+        }
+        .cell-code pre {
+            margin: 0;
+            padding: 0.75rem;
+            background: var(--bg-code);
+            overflow-x: auto;
+            color: var(--text-primary);
+        }
+        .cell-output {
+            padding: 0.75rem;
+            background: var(--bg-primary);
+        }
+        .cell-output.collapsed {
+            display: none;
+        }
+        .cell-stdout {
+            background: var(--bg-tertiary);
+            padding: 0.75rem;
+            border-radius: 1px;
+            margin: 0.25rem 0;
+            font-family: inherit;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            color: var(--text-primary);
+        }
+        .cell-stderr {
+            background: var(--bg-error);
+            border-left: 2px solid var(--border-error);
+            padding: 1rem;
+            margin: 0.5rem 0;
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--text-error);
+            white-space: pre-wrap;
+        }
+        .cell-artifacts {
+            margin: 1rem 0;
+        }
+        .cell-artifacts h4 {
+            margin: 0 0 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .artifact {
+            display: inline-block;
+            background: var(--bg-artifact);
+            padding: 0.25rem 0.5rem;
+            border-radius: 1px;
+            margin: 0.25rem 0.5rem 0.25rem 0;
+            font-family: inherit;
+            font-size: 0.8rem;
+            color: var(--text-link);
+            text-decoration: none;
+            transition: background-color 0.2s ease;
+            border: 1px solid var(--border-primary);
+        }
+        .artifact:hover {
+            background: var(--bg-artifact-hover);
+        }
+        .artifact-preview {
+            margin-top: 1rem;
+        }
+        .artifact-preview img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid var(--border-primary);
+            border-radius: 1px;
+        }
+        .cell-failed {
+            border-color: var(--border-cell-failed);
+        }
+        .cell-failed .cell-header {
+            background: var(--bg-error);
+            color: var(--text-error);
+        }
+        h1, h2, h3, h4, h5, h6 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
+        }
+        h1 {
+            margin-top: 0;
+            margin-bottom: 1rem;
+        }
+        p {
+            margin: 0.75rem 0;
+            color: var(--text-primary);
+        }
+        a {
+            color: var(--text-link);
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 1px;
+            box-shadow: none;
+        }
+        pre, code {
+            font-family: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Monaco, 'Consolas', monospace;
+        }
+        
+        /* Line numbers */
+        .highlight-with-lines {
+            display: flex;
+        }
+        .line-numbers {
+            background: var(--bg-tertiary);
+            padding: 0.75rem 0.5rem;
+            font-family: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Monaco, 'Consolas', monospace;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            user-select: none;
+            text-align: right;
+            border-right: 1px solid var(--border-primary);
+        }
+        .line-numbers .line-number {
+            display: block;
+            line-height: 1.5;
+        }
+        .highlight-with-lines .highlight {
+            flex: 1;
+        }
+        .highlight-with-lines .highlight pre {
+            padding-left: 0.75rem;
+        }
+        
+        /* Collapsed code styling */
+        .cell-code.collapsed {
+            display: none;
+        }
+        .cell-code.expanded {
+            display: block;
+        }
+        {% if config.collapse_code %}
+        .cell-code {
+            display: none;
+        }
+        {% else %}
+        .cell-code {
+            display: block;
+        }
+        {% endif %}
+        
+        {{ pygments_css }}
+        
+        /* Custom CSS from frontmatter */
+        {{ config.custom_css }}
+        
+        /* Cursor for tools */
+        body[data-tool="arrow"] .main-content { cursor: crosshair; }
+        body[data-tool="eraser"] .main-content { cursor: cell; }
+    </style>
+    <script>
+        // --- Drag utilities ---
+        function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+
+        function restorePosition(el, storageKey) {
+            try {
+                const raw = localStorage.getItem(storageKey);
+                if (!raw) return;
+                const pos = JSON.parse(raw);
+                if (typeof pos.left === 'number' && typeof pos.top === 'number') {
+                    el.style.left = pos.left + 'px';
+                    el.style.top = pos.top + 'px';
+                    el.style.right = 'auto';
+                    el.style.bottom = 'auto';
+                }
+            } catch (_) {}
+        }
+
+        function savePosition(el, storageKey) {
+            try {
+                const left = parseFloat(el.style.left || 'NaN');
+                const top = parseFloat(el.style.top || 'NaN');
+                if (!Number.isNaN(left) && !Number.isNaN(top)) {
+                    localStorage.setItem(storageKey, JSON.stringify({ left, top }));
+                }
+            } catch (_) {}
+        }
+
+        function makeDraggable(el, storageKey, handleEl) {
+            let dragging = false;
+            let startX = 0, startY = 0; // cursor
+            let origLeft = 0, origTop = 0; // element
+
+            const onMove = (e) => {
+                if (!dragging) return;
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const dx = clientX - startX;
+                const dy = clientY - startY;
+                const w = el.offsetWidth;
+                const h = el.offsetHeight;
+                const maxX = window.innerWidth - w;
+                const maxY = window.innerHeight - h;
+                const newLeft = clamp(origLeft + dx, 0, maxX);
+                const newTop = clamp(origTop + dy, 0, maxY);
+                el.style.left = newLeft + 'px';
+                el.style.top = newTop + 'px';
+                el.style.right = 'auto';
+                el.style.bottom = 'auto';
+            };
+
+            const endDrag = () => {
+                if (!dragging) return;
+                dragging = false;
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', endDrag);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', endDrag);
+                handleEl && (handleEl.style.cursor = 'grab');
+                savePosition(el, storageKey);
+                // ensure no-overlap constraint after a drag
+                try { layoutWidgetsStackedBottomRight(); } catch (_) {}
+            };
+
+            const startDrag = (e) => {
+                // Start from element's current on-screen rect
+                const rect = el.getBoundingClientRect();
+                el.style.left = rect.left + 'px';
+                el.style.top = rect.top + 'px';
+                el.style.right = 'auto';
+                el.style.bottom = 'auto';
+
+                dragging = true;
+                startX = e.touches ? e.touches[0].clientX : e.clientX;
+                startY = e.touches ? e.touches[0].clientY : e.clientY;
+                origLeft = rect.left;
+                origTop = rect.top;
+
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', endDrag);
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('touchend', endDrag);
+                handleEl && (handleEl.style.cursor = 'grabbing');
+                e.preventDefault();
+            };
+
+            (handleEl || el).addEventListener('mousedown', startDrag);
+            (handleEl || el).addEventListener('touchstart', startDrag, { passive: false });
+
+            // Apply any saved position on init
+            restorePosition(el, storageKey);
+        }
+        function toggleCell(cellId) {
+            const codeElement = document.getElementById('code-' + cellId);
+            const outputElement = document.getElementById('output-' + cellId);
+            
+            if (codeElement) {
+                codeElement.classList.toggle('collapsed');
+            }
+            if (outputElement) {
+                outputElement.classList.toggle('collapsed');
+            }
+            
+            updateIndicators(cellId);
+        }
+        
+        function toggleCode(cellId) {
+            const codeElement = document.getElementById('code-' + cellId);
+            if (codeElement) {
+                codeElement.classList.toggle('collapsed');
+                updateIndicators(cellId);
+            }
+        }
+        
+        function toggleOutput(cellId) {
+            const outputElement = document.getElementById('output-' + cellId);
+            if (outputElement) {
+                outputElement.classList.toggle('collapsed');
+                updateIndicators(cellId);
+            }
+        }
+        
+        function updateIndicators(cellId) {
+            const codeElement = document.getElementById('code-' + cellId);
+            const outputElement = document.getElementById('output-' + cellId);
+            const indicators = document.querySelector(`[onclick*="${cellId}"]`)?.closest('.cell-header')?.querySelector('.collapse-indicators');
+            
+            if (indicators) {
+                const codeCollapsed = codeElement && codeElement.classList.contains('collapsed');
+                const outputCollapsed = outputElement && outputElement.classList.contains('collapsed');
+                
+                const codeIcon = codeCollapsed ? '▶' : '▼';
+                const outputIcon = outputCollapsed ? '▶' : '▼';
+                
+                const codeSpan = indicators.querySelector('[onclick*="toggleCode"]');
+                const outputSpan = indicators.querySelector('[onclick*="toggleOutput"]');
+                
+                if (codeSpan) codeSpan.innerHTML = `${codeIcon} code`;
+                if (outputSpan) outputSpan.innerHTML = `${outputIcon} output`;
+            }
+        }
+        
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('uvnote-theme', newTheme);
+            updateThemeIcon();
+        }
+        
+        // Two panel code removed
+        
+        function updateThemeIcon() {
+            const theme = document.documentElement.getAttribute('data-theme');
+            const toggle = document.querySelector('.theme-toggle');
+            if (toggle) {
+                toggle.textContent = theme === 'dark' ? 'light' : 'dark';
+            }
+        }
+
+        function resetLayout() {
+            try {
+                const keys = [
+                    'uvnote-theme',
+                    'uvnote-minimap-pos',
+                    'uvnote-file-explorer-pos',
+                    'uvnote-tools-pos',
+                    'uvnote-active-tool',
+                    'uvnote-arrow-color',
+                    'uvnote-shapes',
+                    // legacy keys
+                    'uvnote-panels',
+                    'uvnote-shapes-two-left',
+                    'uvnote-shapes-single'
+                ];
+                keys.forEach(k => localStorage.removeItem(k));
+            } catch (_) {}
+            // Reload to reinitialize UI with defaults
+            location.reload();
+        }
+
+        // Layout: stack widgets bottom-right and equalize widths
+        function hasCustomWidgetPositions() {
+            try {
+                return (
+                    localStorage.getItem('uvnote-minimap-pos') ||
+                    localStorage.getItem('uvnote-file-explorer-pos') ||
+                    localStorage.getItem('uvnote-tools-pos')
+                );
+            } catch (_) { return false; }
+        }
+
+        function rectsOverlap(r1, r2) {
+            return !(r1.right <= r2.left || r2.right <= r1.left || r1.bottom <= r2.top || r2.bottom <= r1.top);
+        }
+
+        function widgetsOverlap(widgets) {
+            for (let i = 0; i < widgets.length; i++) {
+                const a = widgets[i];
+                const ra = a.getBoundingClientRect();
+                for (let j = i + 1; j < widgets.length; j++) {
+                    const b = widgets[j];
+                    const rb = b.getBoundingClientRect();
+                    if (rectsOverlap(ra, rb)) return true;
+                }
+            }
+            return false;
+        }
+
+        function applyStackLayout(widgets, order) {
+            if (!widgets.length) return;
+            // Fixed equal width
+            const fixedWidth = 220;
+            widgets.forEach(el => { el.style.width = fixedWidth + 'px'; });
+
+            // Fit heights if needed to avoid overflow
+            const gap = 12;
+            const available = Math.max(0, window.innerHeight - 40 - gap * (order.length - 1));
+            const eachMax = Math.floor(available / order.length);
+            order.forEach(el => {
+                el.style.maxHeight = eachMax + 'px';
+                el.style.overflowY = 'auto';
+            });
+
+            // Stack bottom-up in the requested order
+            let bottomOffset = 20; // base gutter
+            order.forEach(el => {
+                el.style.left = 'auto';
+                el.style.top = 'auto';
+                el.style.right = '20px';
+                el.style.bottom = bottomOffset + 'px';
+                bottomOffset += el.offsetHeight + gap;
+            });
+        }
+
+        function layoutWidgetsStackedBottomRight() {
+            const minimap = document.querySelector('.minimap');
+            const fileExplorer = document.querySelector('.file-explorer');
+            const tools = document.querySelector('.tools-widget');
+            const widgets = [minimap, fileExplorer, tools].filter(el => el && getComputedStyle(el).display !== 'none');
+            if (!widgets.length) return;
+
+            const order = [minimap, fileExplorer, tools].filter(Boolean).filter(el => getComputedStyle(el).display !== 'none');
+
+            // If user placed custom positions and there is no overlap, respect them.
+            if (hasCustomWidgetPositions() && !widgetsOverlap(widgets)) return;
+
+            applyStackLayout(widgets, order);
+        }
+        
+        // Panel icon removed
+        
+        let _minimapScrollContainer = null;
+        let _minimapScrollHandler = null;
+        function initMinimap() {
+            // Generate minimap content
+            const minimap = createMinimap();
+            document.body.appendChild(minimap);
+            // Make draggable (use title as handle)
+            const mTitle = minimap.querySelector('.minimap-title');
+            makeDraggable(minimap, 'uvnote-minimap-pos', mTitle);
+
+            // Attach scroll listener to window (two-panel removed)
+            _minimapScrollContainer = window;
+
+            if (_minimapScrollContainer) {
+                _minimapScrollHandler = () => updateMinimapActive();
+                if (_minimapScrollContainer === window) {
+                    window.addEventListener('scroll', _minimapScrollHandler);
+                } else {
+                    _minimapScrollContainer.addEventListener('scroll', _minimapScrollHandler);
+                }
+            }
+            updateMinimapActive();
+        }
+
+        function teardownMinimap() {
+            const minimap = document.querySelector('.minimap');
+            if (minimap && minimap.parentNode) minimap.parentNode.removeChild(minimap);
+            if (_minimapScrollContainer && _minimapScrollHandler) {
+                if (_minimapScrollContainer === window) {
+                    window.removeEventListener('scroll', _minimapScrollHandler);
+                } else {
+                    _minimapScrollContainer.removeEventListener('scroll', _minimapScrollHandler);
+                }
+            }
+            _minimapScrollContainer = null;
+            _minimapScrollHandler = null;
+        }
+        
+        function initFileExplorer() {
+            // Generate file explorer content
+            const fileExplorer = createFileExplorer();
+            document.body.appendChild(fileExplorer);
+        }
+        
+        function createMinimap() {
+            const minimap = document.createElement('div');
+            minimap.className = 'minimap';
+            
+            const title = document.createElement('div');
+            title.className = 'minimap-title';
+            title.textContent = 'navigation';
+            minimap.appendChild(title);
+            
+            // Find all headings and cells
+            const root = document.querySelector('.main-content') || document;
+            const headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            const cells = root.querySelectorAll('.cell');
+            
+            // Combine and sort by position
+            const items = [];
+            
+            headings.forEach(heading => {
+                const id = heading.id || generateId(heading.textContent);
+                if (!heading.id) heading.id = id;
+                
+                items.push({
+                    element: heading,
+                    type: 'heading',
+                    level: parseInt(heading.tagName.charAt(1)),
+                    text: heading.textContent.trim(),
+                    id: id,
+                    position: heading.getBoundingClientRect().top + window.scrollY
+                });
+            });
+            
+            cells.forEach(cell => {
+                const header = cell.querySelector('.cell-header');
+                if (header) {
+                    const id = cell.id || `cell-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    if (!cell.id) cell.id = id;
+                    
+                    items.push({
+                        element: cell,
+                        type: 'cell',
+                        text: header.textContent.trim(),
+                        id: id,
+                        position: cell.getBoundingClientRect().top + window.scrollY
+                    });
+                }
+            });
+            
+            // Sort by position
+            items.sort((a, b) => a.position - b.position);
+            
+            // Create minimap items
+            items.forEach(item => {
+                const link = document.createElement('a');
+                link.className = `minimap-item ${item.type === 'heading' ? 'minimap-heading' : 'minimap-cell'}`;
+                if (item.type === 'heading') {
+                    link.classList.add(`h${item.level}`);
+                }
+                link.textContent = item.text.length > 25 ? item.text.substring(0, 22) + '...' : item.text;
+                link.href = `#${item.id}`;
+                link.onclick = function(e) {
+                    e.preventDefault();
+                    item.element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                };
+                minimap.appendChild(link);
+            });
+            
+            return minimap;
+        }
+        
+        function generateId(text) {
+            return text.toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .substring(0, 20);
+        }
+        
+        function updateMinimapActive() {
+            const minimapItems = document.querySelectorAll('.minimap-item');
+            const container = _minimapScrollContainer || window;
+            const containerRect = container === window ? null : container.getBoundingClientRect();
+            const scrollPos = (container === window ? window.scrollY : container.scrollTop) + 100; // Offset for better detection
+            
+            let activeItem = null;
+            minimapItems.forEach(item => {
+                const targetId = item.getAttribute('href').substring(1);
+                const target = document.getElementById(targetId);
+                
+                if (target) {
+                    const rectTop = target.getBoundingClientRect().top;
+                    const targetPos = (container === window)
+                        ? rectTop + window.scrollY
+                        : rectTop - containerRect.top + container.scrollTop;
+                    if (targetPos <= scrollPos) {
+                        activeItem = item;
+                    }
+                }
+                
+                item.classList.remove('active');
+            });
+            
+            if (activeItem) {
+                activeItem.classList.add('active');
+            }
+        }
+        
+        function createFileExplorer() {
+            const fileExplorer = document.createElement('div');
+            fileExplorer.className = 'file-explorer';
+            
+            const title = document.createElement('div');
+            title.className = 'file-explorer-title';
+            title.textContent = 'files';
+            fileExplorer.appendChild(title);
+            // Make draggable (use title as handle)
+            makeDraggable(fileExplorer, 'uvnote-file-explorer-pos', title);
+            
+            // Scripts section
+            const scriptsSection = document.createElement('div');
+            scriptsSection.className = 'file-explorer-section';
+            
+            const scriptsTitle = document.createElement('div');
+            scriptsTitle.className = 'file-explorer-section-title';
+            scriptsTitle.textContent = 'scripts';
+            scriptsSection.appendChild(scriptsTitle);
+            
+            // Find all cells and list their script files (single panel)
+            const root = document.querySelector('.main-content') || document;
+            const cells = root.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const header = cell.querySelector('.cell-header');
+                if (header) {
+                    const cellText = header.textContent.trim();
+                    const cellMatch = cellText.match(/Cell: ([a-zA-Z_][a-zA-Z0-9_]*)/);
+                    if (cellMatch) {
+                        const cellId = cellMatch[1];
+                        const scriptItem = document.createElement('div');
+                        scriptItem.className = 'file-explorer-item script';
+                        scriptItem.textContent = `${cellId}.py`;
+                        scriptItem.onclick = function() {
+                            cell.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        };
+                        scriptsSection.appendChild(scriptItem);
+                    }
+                }
+            });
+            
+            fileExplorer.appendChild(scriptsSection);
+            
+            // Artifacts section
+            const artifactsSection = document.createElement('div');
+            artifactsSection.className = 'file-explorer-section';
+            
+            const artifactsTitle = document.createElement('div');
+            artifactsTitle.className = 'file-explorer-section-title';
+            artifactsTitle.textContent = 'artifacts';
+            artifactsSection.appendChild(artifactsTitle);
+            
+            // Find all artifact links (single panel)
+            const artifactsRoot = document.querySelector('.main-content') || document;
+            const artifacts = artifactsRoot.querySelectorAll('.artifact');
+            if (artifacts.length === 0) {
+                const noArtifacts = document.createElement('div');
+                noArtifacts.className = 'file-explorer-item artifact';
+                noArtifacts.textContent = '(none)';
+                noArtifacts.style.opacity = '0.5';
+                artifactsSection.appendChild(noArtifacts);
+            } else {
+                artifacts.forEach(artifact => {
+                    const artifactItem = document.createElement('div');
+                    artifactItem.className = 'file-explorer-item artifact';
+                    artifactItem.textContent = artifact.textContent;
+                    artifactItem.onclick = function() {
+                        artifact.click();
+                    };
+                    artifactsSection.appendChild(artifactItem);
+                });
+            }
+            
+            fileExplorer.appendChild(artifactsSection);
+            
+            return fileExplorer;
+        }
+
+        // Tools widget
+        function setActiveTool(tool) {
+            if (!tool || tool === 'none') {
+                document.body.dataset.tool = 'none';
+                localStorage.setItem('uvnote-active-tool', 'none');
+                setOverlayActive(false);
+                return;
+            }
+            document.body.dataset.tool = tool;
+            localStorage.setItem('uvnote-active-tool', tool);
+            setOverlayActive(true);
+        }
+
+        function getArrowColor() {
+            const saved = localStorage.getItem('uvnote-arrow-color');
+            if (saved) return saved;
+            const fallback = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#333';
+            return fallback;
+        }
+
+        function setStoredArrowColor(color) {
+            try { localStorage.setItem('uvnote-arrow-color', color); } catch (_) {}
+        }
+
+        function createToolsWidget() {
+            const tools = document.createElement('div');
+            tools.className = 'tools-widget';
+
+            const title = document.createElement('div');
+            title.className = 'tools-title';
+            title.textContent = 'tools';
+            tools.appendChild(title);
+
+            const row = document.createElement('div');
+            row.className = 'tools-row';
+            tools.appendChild(row);
+
+            // Arrow tool
+            const arrowBtn = document.createElement('div');
+            arrowBtn.className = 'tool-button';
+            arrowBtn.textContent = 'arrow';
+            arrowBtn.onclick = function() {
+                const isActive = arrowBtn.classList.contains('active');
+                if (isActive) {
+                    arrowBtn.classList.remove('active');
+                    setActiveTool('none');
+                } else {
+                    tools.querySelectorAll('.tool-button').forEach(b => b.classList.remove('active'));
+                    arrowBtn.classList.add('active');
+                    setActiveTool('arrow');
+                }
+            };
+            row.appendChild(arrowBtn);
+
+            // Eraser tool
+            const eraseBtn = document.createElement('div');
+            eraseBtn.className = 'tool-button';
+            eraseBtn.textContent = 'eraser';
+            eraseBtn.onclick = function() {
+                const isActive = eraseBtn.classList.contains('active');
+                if (isActive) {
+                    eraseBtn.classList.remove('active');
+                    setActiveTool('none');
+                } else {
+                    tools.querySelectorAll('.tool-button').forEach(b => b.classList.remove('active'));
+                    eraseBtn.classList.add('active');
+                    setActiveTool('eraser');
+                }
+            };
+            row.appendChild(eraseBtn);
+
+            // Clear all
+            const clearBtn = document.createElement('div');
+            clearBtn.className = 'tool-button';
+            clearBtn.textContent = 'clear';
+            clearBtn.onclick = function() {
+                _shapes = [];
+                saveShapes();
+                renderOverlay();
+            };
+            row.appendChild(clearBtn);
+
+            // Restore active state from storage
+            const saved = localStorage.getItem('uvnote-active-tool') || 'none';
+            if (saved === 'arrow') {
+                arrowBtn.classList.add('active');
+                setActiveTool('arrow');
+            } else if (saved === 'eraser') {
+                eraseBtn.classList.add('active');
+                setActiveTool('eraser');
+            }
+
+            // Color selector
+            const colorTitle = document.createElement('div');
+            colorTitle.className = 'tools-section-title';
+            colorTitle.textContent = 'color';
+            tools.appendChild(colorTitle);
+
+            const colorRow = document.createElement('div');
+            colorRow.className = 'tools-row color-row';
+            tools.appendChild(colorRow);
+
+            const swatchColors = ['#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#000000', '#ffffff'];
+            const swatches = [];
+            swatchColors.forEach(c => {
+                const s = document.createElement('div');
+                s.className = 'color-swatch';
+                s.style.backgroundColor = c;
+                s.title = c;
+                s.onclick = () => {
+                    setStoredArrowColor(c);
+                    refreshColorUI(c);
+                };
+                colorRow.appendChild(s);
+                swatches.push(s);
+            });
+
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.className = 'color-input';
+            colorInput.oninput = () => {
+                setStoredArrowColor(colorInput.value);
+                refreshColorUI(colorInput.value);
+            };
+            colorRow.appendChild(colorInput);
+
+            function refreshColorUI(selected) {
+                swatches.forEach(s => {
+                    const sCol = s.style.backgroundColor;
+                    const norm = (val) => {
+                        const tmp = document.createElement('div');
+                        tmp.style.color = val;
+                        document.body.appendChild(tmp);
+                        const out = getComputedStyle(tmp).color;
+                        tmp.remove();
+                        return out;
+                    };
+                    if (norm(sCol) === norm(selected)) s.classList.add('selected'); else s.classList.remove('selected');
+                });
+                try { colorInput.value = selected.startsWith('#') ? selected : rgbToHex(selected); } catch (_) {}
+            }
+
+            function rgbToHex(rgb) {
+                const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+                if (!m) return '#000000';
+                const r = parseInt(m[1]).toString(16).padStart(2, '0');
+                const g = parseInt(m[2]).toString(16).padStart(2, '0');
+                const b = parseInt(m[3]).toString(16).padStart(2, '0');
+                return `#${r}${g}${b}`;
+            }
+
+            // Restore color selection
+            refreshColorUI(getArrowColor());
+
+            // Draggable behavior
+            makeDraggable(tools, 'uvnote-tools-pos', title);
+
+            return tools;
+        }
+
+        function initTools() {
+            const widget = createToolsWidget();
+            document.body.appendChild(widget);
+        }
+
+        function teardownTools() {
+            const w = document.querySelector('.tools-widget');
+            if (w && w.parentNode) w.parentNode.removeChild(w);
+        }
+
+        // --- Canvas overlay for tools ---
+        let _overlay = null;
+        let _overlayCtx = null;
+        let _overlayContainer = null; // window
+        let _overlayMode = 'single';
+        let _overlayResizeHandler = null;
+        let _overlayScrollHandler = null;
+        let _drawing = null; // current in-progress arrow {x1,y1,x2,y2}
+        let _shapes = []; // committed shapes for current mode
+
+        function getOverlayStorageKey() { return 'uvnote-shapes'; }
+
+        function loadShapes() {
+            try {
+                const raw = localStorage.getItem(getOverlayStorageKey());
+                _shapes = raw ? JSON.parse(raw) : [];
+            } catch (_) { _shapes = []; }
+        }
+
+        function saveShapes() {
+            try { localStorage.setItem(getOverlayStorageKey(), JSON.stringify(_shapes)); } catch (_) {}
+        }
+
+        function getContentContainer() { return window; }
+
+        function updateOverlayModeAndContainer() {
+            _overlayContainer = window;
+            _overlayMode = 'single';
+        }
+
+        function updateOverlayBounds() {
+            if (!_overlay) return;
+            if (_overlayContainer === window) {
+                _overlay.style.position = 'fixed';
+                _overlay.style.left = '0px';
+                _overlay.style.top = '0px';
+                _overlay.width = window.innerWidth;
+                _overlay.height = window.innerHeight;
+            } else {
+                const rect = _overlayContainer.getBoundingClientRect();
+                _overlay.style.position = 'fixed';
+                _overlay.style.left = rect.left + 'px';
+                _overlay.style.top = rect.top + 'px';
+                _overlay.width = Math.max(0, Math.floor(rect.width));
+                _overlay.height = Math.max(0, Math.floor(rect.height));
+            }
+            renderOverlay();
+        }
+
+        function containerScrollLeft() {
+            return (_overlayContainer === window) ? (window.scrollX || 0) : (_overlayContainer.scrollLeft || 0);
+        }
+        function containerScrollTop() {
+            return (_overlayContainer === window) ? (window.scrollY || 0) : (_overlayContainer.scrollTop || 0);
+        }
+
+        function toCanvasCoords(clientX, clientY) {
+            const rect = _overlay.getBoundingClientRect();
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function onPointerDown(e) {
+            const tool = document.body.dataset.tool;
+            if (tool === 'arrow') {
+                startDrawArrow(e);
+            } else if (tool === 'eraser') {
+                eraseAt(e);
+            }
+        }
+
+        function startDrawArrow(e) {
+            if (document.body.dataset.tool !== 'arrow') return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _drawing = {
+                x1: pt.x + containerScrollLeft(),
+                y1: pt.y + containerScrollTop(),
+                x2: pt.x + containerScrollLeft(),
+                y2: pt.y + containerScrollTop(),
+                color: getArrowColor(),
+                width: 2
+            };
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function moveDrawArrow(e) {
+            if (!_drawing) return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _drawing.x2 = pt.x + containerScrollLeft();
+            _drawing.y2 = pt.y + containerScrollTop();
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function endDrawArrow() {
+            if (!_drawing) return;
+            _shapes.push({ type: 'arrow', ..._drawing });
+            _drawing = null;
+            saveShapes();
+            renderOverlay();
+        }
+
+        function distPointToSegment(px, py, x1, y1, x2, y2) {
+            const dx = x2 - x1, dy = y2 - y1;
+            if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
+            const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx*dx + dy*dy)));
+            const cx = x1 + t * dx, cy = y1 + t * dy;
+            return Math.hypot(px - cx, py - cy);
+        }
+
+        function eraseAt(e) {
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            const x = pt.x + containerScrollLeft();
+            const y = pt.y + containerScrollTop();
+            const threshold = 10; // pixels
+            for (let i = _shapes.length - 1; i >= 0; i--) {
+                const s = _shapes[i];
+                if (s.type === 'arrow') {
+                    const d = distPointToSegment(x, y, s.x1, s.y1, s.x2, s.y2);
+                    if (d <= threshold) {
+                        _shapes.splice(i, 1);
+                        saveShapes();
+                        renderOverlay();
+                        break;
+                    }
+                }
+            }
+            e.preventDefault();
+        }
+
+        function drawArrow(ctx, x1, y1, x2, y2, color, width) {
+            // Draw line
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            // Arrowhead
+            const headLen = 10 + width * 2;
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const hx1 = x2 - headLen * Math.cos(angle - Math.PI / 6);
+            const hy1 = y2 - headLen * Math.sin(angle - Math.PI / 6);
+            const hx2 = x2 - headLen * Math.cos(angle + Math.PI / 6);
+            const hy2 = y2 - headLen * Math.sin(angle + Math.PI / 6);
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(hx1, hy1);
+            ctx.lineTo(hx2, hy2);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function renderOverlay() {
+            if (!_overlay || !_overlayCtx) return;
+            _overlayCtx.clearRect(0, 0, _overlay.width, _overlay.height);
+            const offX = containerScrollLeft();
+            const offY = containerScrollTop();
+            // Draw committed shapes for current mode
+            for (const s of _shapes) {
+                if (s.type === 'arrow') {
+                    drawArrow(_overlayCtx, s.x1 - offX, s.y1 - offY, s.x2 - offX, s.y2 - offY, s.color || '#f00', s.width || 2);
+                }
+            }
+            // Draw current drawing
+            if (_drawing) {
+                drawArrow(_overlayCtx, _drawing.x1 - offX, _drawing.y1 - offY, _drawing.x2 - offX, _drawing.y2 - offY, _drawing.color, _drawing.width);
+            }
+        }
+
+        function setOverlayActive(active) {
+            if (!_overlay) initOverlay();
+            _overlay.style.pointerEvents = active ? 'auto' : 'none';
+            // Re-render to ensure visibility aligns with content
+            renderOverlay();
+        }
+
+        function initOverlay() {
+            if (_overlay) return;
+            updateOverlayModeAndContainer();
+            _overlay = document.createElement('canvas');
+            _overlay.className = 'draw-overlay';
+            _overlayCtx = _overlay.getContext('2d');
+            document.body.appendChild(_overlay);
+            updateOverlayBounds();
+            loadShapes();
+            renderOverlay();
+
+            // Events
+            _overlay.addEventListener('mousedown', onPointerDown);
+            _overlay.addEventListener('mousemove', moveDrawArrow);
+            document.addEventListener('mouseup', endDrawArrow);
+            _overlay.addEventListener('touchstart', onPointerDown, { passive: false });
+            _overlay.addEventListener('touchmove', moveDrawArrow, { passive: false });
+            document.addEventListener('touchend', endDrawArrow);
+
+            _overlayResizeHandler = () => updateOverlayBounds();
+            window.addEventListener('resize', _overlayResizeHandler);
+
+            _overlayScrollHandler = () => renderOverlay();
+            window.addEventListener('scroll', _overlayScrollHandler);
+        }
+
+        function rebindOverlayContainer() {
+            if (!_overlay) return;
+            // Remove old scroll handler
+            if (_overlayScrollHandler) { window.removeEventListener('scroll', _overlayScrollHandler); }
+            updateOverlayModeAndContainer();
+            updateOverlayBounds();
+            loadShapes();
+            renderOverlay();
+            _overlayScrollHandler = () => renderOverlay();
+            window.addEventListener('scroll', _overlayScrollHandler);
+        }
+
+        function teardownOverlay() {
+            if (!_overlay) return;
+            _overlay.removeEventListener('mousedown', onPointerDown);
+            _overlay.removeEventListener('mousemove', moveDrawArrow);
+            document.removeEventListener('mouseup', endDrawArrow);
+            _overlay.removeEventListener('touchstart', onPointerDown);
+            _overlay.removeEventListener('touchmove', moveDrawArrow);
+            document.removeEventListener('touchend', endDrawArrow);
+            if (_overlayResizeHandler) window.removeEventListener('resize', _overlayResizeHandler);
+            if (_overlayScrollHandler) {
+                if (_overlayContainer === window) {
+                    window.removeEventListener('scroll', _overlayScrollHandler);
+                } else if (_overlayContainer) {
+                    _overlayContainer.removeEventListener('scroll', _overlayScrollHandler);
+                }
+            }
+            if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
+            _overlay = null; _overlayCtx = null; _overlayContainer = null; _overlayResizeHandler = null; _overlayScrollHandler = null; _drawing = null;
+        }
+        
+        function teardownFileExplorer() {
+            const fe = document.querySelector('.file-explorer');
+            if (fe && fe.parentNode) fe.parentNode.removeChild(fe);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            updateThemeIcon();
+            initMinimap();
+            initFileExplorer();
+            initTools();
+            initOverlay();
+            layoutWidgetsStackedBottomRight();
+            window.addEventListener('resize', layoutWidgetsStackedBottomRight);
+        });
+    </script>
+</head>
+<body>
+    <div class="controls">
+        <div class="theme-toggle" onclick="toggleTheme()">light</div>
+        <div class="reset-toggle" onclick="resetLayout()">reset</div>
+    </div>
+    
+    <div class="main-content">
+        {{ content | safe }}
+    </div>
+    
+    
+</body>
+</html>"""
+
+
+def highlight_code(code: str, config: DocumentConfig) -> str:
+    """Highlight Python code using Pygments."""
+    lexer = PythonLexer()
+    formatter = HtmlFormatter(
+        style=config.syntax_theme,
+        nowrap=False,
+        linenos=config.show_line_numbers,
+        linenos_special=1,
+        cssclass="highlight"
+    )
+    return highlight(code, lexer, formatter)
+
+
+def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) -> str:
+    """Render a single cell as HTML."""
+    cell_class = "cell"
+    if not result.success:
+        cell_class += " cell-failed"
+    
+    html_parts = [f'<div class="{cell_class}">']
+    
+    # Cell header
+    header_parts = [f'Cell: {cell.id}']
+    if cell.deps:
+        header_parts.append(f'deps: {", ".join(cell.deps)}')
+    if result.duration:
+        header_parts.append(f'{result.duration:.2f}s')
+    if not result.success:
+        header_parts.append('FAILED')
+    
+    # Add collapse indicators to header
+    code_indicator = "▶" if cell.collapse_code else "▼"
+    output_indicator = "▶" if cell.collapse_output else "▼"
+    
+    html_parts.append(f'<div class="cell-header">')
+    html_parts.append(f'<span class="collapse-indicators">')
+    html_parts.append(f'<span onclick="toggleCode(\'{cell.id}\')" style="cursor: pointer;">{code_indicator} code</span> ')
+    html_parts.append(f'<span onclick="toggleOutput(\'{cell.id}\')" style="cursor: pointer;">{output_indicator} output</span>')
+    html_parts.append(f'</span> | ')
+    html_parts.append(' | '.join(header_parts))
+    html_parts.append('</div>')
+    
+    # Cell code - handle collapse state
+    code_class = "cell-code"
+    if cell.collapse_code:
+        code_class += " collapsed"
+    html_parts.append(f'<div id="code-{cell.id}" class="{code_class}">')
+    html_parts.append(highlighted_code)
+    html_parts.append('</div>')
+    
+    # Cell output - handle collapse state
+    output_class = "cell-output"
+    if cell.collapse_output:
+        output_class += " collapsed"
+    html_parts.append(f'<div id="output-{cell.id}" class="{output_class}">')
+    
+    if result.stdout:
+        html_parts.append(f'<div class="cell-stdout">{html.escape(result.stdout)}</div>')
+    
+    if result.stderr:
+        html_parts.append(f'<div class="cell-stderr">{html.escape(result.stderr)}</div>')
+    
+    if result.artifacts:
+        html_parts.append('<div class="cell-artifacts">')
+        html_parts.append('<h4>Artifacts:</h4>')
+        
+        for artifact in result.artifacts:
+            html_parts.append(f'<a href="artifacts/{cell.id}/{artifact}" class="artifact" target="_blank">{artifact}</a>')
+        
+        # Image previews
+        for artifact in result.artifacts:
+            if artifact.endswith(('.png', '.jpg', '.jpeg')):
+                html_parts.append('<div class="artifact-preview">')
+                html_parts.append(f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">')
+                html_parts.append('</div>')
+        
+        html_parts.append('</div>')
+    
+    html_parts.append('</div>')
+    html_parts.append('</div>')
+    
+    return '\n'.join(html_parts)
+
+
+def generate_html(
+    markdown_content: str,
+    config: DocumentConfig,
+    cells: List[CodeCell],
+    results: List[ExecutionResult],
+    output_path: Path,
+    work_dir: Path
+) -> None:
+    """Generate static HTML from markdown content and execution results."""
+    
+    # Extract content without frontmatter for processing
+    from .parser import parse_frontmatter
+    _, content_without_frontmatter = parse_frontmatter(markdown_content)
+    
+    # Convert markdown to HTML (excluding code blocks)
+    md = markdown.Markdown(extensions=['extra', 'codehilite'])
+    
+    # Prepare cell data for template
+    results_by_id = {r.cell_id: r for r in results}
+    cells_by_id = {cell.id: cell for cell in cells}
+    
+    # Process markdown, replacing code blocks with rendered cells
+    lines = content_without_frontmatter.splitlines()
+    new_lines = []
+    i = 0
+    
+    while i < len(lines):
+        # Check if this line starts a Python code block
+        if lines[i].strip().startswith('```python'):
+            # Find matching cell
+            cell_found = False
+            for cell in cells:
+                if cell.line_start == i + 1:  # Fence at i=4, first code line at i+1=5
+                    # Render the cell HTML here
+                    result = results_by_id.get(cell.id)
+                    if result:
+                        highlighted_code = highlight_code(cell.code, config)
+                        cell_html = render_cell(cell, result, highlighted_code)
+                        new_lines.append(cell_html)
+                    cell_found = True
+                    break
+            
+            # Skip until we find the closing ```
+            while i < len(lines) and not lines[i].strip() == '```':
+                i += 1
+            i += 1  # Skip the closing ```
+        else:
+            new_lines.append(lines[i])
+            i += 1
+    
+    # Convert to HTML
+    clean_content = '\n'.join(new_lines)
+    content_html = md.convert(clean_content)
+    
+    # Setup Jinja2 environment
+    env = Environment(loader=BaseLoader())
+    template = env.from_string(HTML_TEMPLATE)
+    
+    # Get Pygments CSS for both themes
+    # Dark theme CSS (use configured syntax theme)
+    dark_formatter = HtmlFormatter(style=config.syntax_theme)
+    dark_css = dark_formatter.get_style_defs('[data-theme="dark"] .highlight')
+    
+    # Light theme CSS (use a light-friendly theme)
+    light_formatter = HtmlFormatter(style='default')
+    light_css = light_formatter.get_style_defs('[data-theme="light"] .highlight')
+    
+    # Combine both CSS
+    pygments_css = f"{light_css}\n\n{dark_css}"
+    
+    # Determine title
+    title = config.title if config.title else output_path.stem
+    
+    # Render HTML
+    html = template.render(
+        title=title,
+        config=config,
+        content=content_html,
+        pygments_css=pygments_css
+    )
+    
+    # Ensure output directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Write HTML file
+    with open(output_path, 'w') as f:
+        f.write(html)
+    
+    # Copy artifacts to output directory
+    artifacts_dir = output_path.parent / "artifacts"
+    cache_dir = work_dir / ".uvnote" / "cache"
+    
+    for result in results:
+        if result.artifacts:
+            result_cache_dir = cache_dir / result.cache_key
+            target_dir = artifacts_dir / result.cell_id
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            for artifact in result.artifacts:
+                src = result_cache_dir / artifact
+                dst = target_dir / artifact
+                if src.exists():
+                    if src.is_file():
+                        shutil.copy2(src, dst)
+                    else:
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
