@@ -1,5 +1,11 @@
 # uvnote
 
+> [!NOTE]
+> uvnote is pre v1, so things are subject to change
+
+<img width="2164" height="1392" alt="uvnotescreen" src="https://github.com/user-attachments/assets/5571a2a0-d849-4078-8395-436943d93082" />
+
+
 `uvnote` is a "Stateless, deterministic notebooks with uv and Markdown."
 
 In other words, its a alternative for Jupyter notebooks that is more lightweight, more reproducible, and more portable.
@@ -47,7 +53,13 @@ Commands:
 
 ### Preview
 
+
+
 If you're a `vscode` user, you can use the `uvnote-preview` extension to preview your uvnote files directly in VSCode.
 
 https://github.com/drbh/uvnote-preview
+
+
+https://github.com/user-attachments/assets/59a470e2-c3f6-46b7-b3ad-b4a0085b8dda
+
 
