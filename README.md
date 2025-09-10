@@ -24,6 +24,16 @@ The premise is simple:
 - no hidden state (cells are not stateful, they are just scripts)
 - no special file formats (just plain markdown)
 
+## Cool features
+
+okay, so the core concept is simple (embed uv scripts in markdown), but there are some cool features that make `uvnote` more powerful than just that!
+
+- interactive auto fading drawing tools to help present the note to others in an engaging way
+- automatically generate a table of contents/links artifacts for easy navigation
+- light/dark mode
+- simplify syntax for dependencies (e.g. `deps=numpy,pandas` in code block header will be expanded to the PEP 723 metadata)
+- and again NO MAGIC, so if you want to change css or add custom HTML you can easily do that.
+
 ## How to use
 
 Currently, the recommended way to use `uvnote` is to directly run the script from GitHub using `uvx`, this will download and run the latest version of `uvnote` without needing to install anything until we have a proper release.
