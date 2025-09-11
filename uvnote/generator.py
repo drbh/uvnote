@@ -1,6 +1,7 @@
 """Static HTML output generator."""
 
 import html
+import os
 import shutil
 from pathlib import Path
 from typing import List
@@ -639,6 +640,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .highlight {
             background: none !important;
+        }
+        
+        /* Loading animations */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-primary);
+            border-radius: 50%;
+            border-top-color: var(--text-link);
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .loading-skeleton {
+            display: inline-block;
+            background: var(--bg-tertiary);
+            background: linear-gradient(
+                90deg,
+                var(--bg-tertiary) 25%,
+                var(--bg-secondary) 50%,
+                var(--bg-tertiary) 75%
+            );
+            background-size: 200% 100%;
+            animation: loading-shimmer 2s ease-in-out infinite;
+            border-radius: 2px;
+            height: 1em;
+            width: 80px;
+            vertical-align: middle;
+        }
+        
+        @keyframes loading-shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        
+        /* Loading state for cell output */
+        .cell-output:has(.loading-spinner) {
+            opacity: 0.7;
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--text-link);
         }
     </style>
     <script>
@@ -1815,6 +1862,72 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </body>
 </html>"""
 
+# Slim template: minimal CSS + tiny JS; no widgets/minimap/tools
+HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"UTF-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+  <title>{{ title }}</title>
+  <script>
+    (function(){
+      const pref='{{ config.theme }}';
+      let theme = pref==='auto' ? (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : (localStorage.getItem('uvnote-theme')||pref);
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+
+    // Minimal UI helpers used by rendered cells
+    function toggleCell(id){toggleCode(id);toggleOutput(id);}
+    function toggleCode(id){
+      const el=document.getElementById('code-'+id);
+      if(el){el.classList.toggle('collapsed');updateIndicators(id);} }
+    function toggleOutput(id){
+      const el=document.getElementById('output-'+id);
+      if(el){el.classList.toggle('collapsed');updateIndicators(id);} }
+    function updateIndicators(id){
+      const header=document.querySelector('.cell-header [onclick*="'+id+'"]')?.closest('.cell-header');
+      if(!header) return;
+      const codeCollapsed=document.getElementById('code-'+id)?.classList.contains('collapsed');
+      const outCollapsed=document.getElementById('output-'+id)?.classList.contains('collapsed');
+      const indicators=header.querySelector('.collapse-indicators');
+      if(!indicators) return;
+      const spans=indicators.querySelectorAll('span');
+      if(spans[0]) spans[0].textContent=(codeCollapsed?'\u25b6':'\u25bc')+' code';
+      if(spans[1]) spans[1].textContent=(outCollapsed?'\u25b6':'\u25bc')+' output';
+    }
+  </script>
+  <style>
+    :root[data-theme=\"light\"]{--bg:#fff;--bg2:#f6f8fa;--code:#f8f9fa;--txt:#333;--muted:#656d76;--link:#0969da;--errbg:#fdf2f2;--err:#c53030;--border:#e1e5e9}
+    :root[data-theme=\"dark\"]{--bg:#0a0a0a;--bg2:#121212;--code:#0d0d0d;--txt:#e0e0e0;--muted:#888;--link:#64b5f6;--errbg:#1a0f0f;--err:#ff6b6b;--border:#2a2a2a}
+    body{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;line-height:1.4;max-width:960px;margin:0 auto;padding:16px;background:var(--bg);color:var(--txt)}
+    .controls{position:fixed;top:16px;right:16px;display:flex;gap:8px}
+    .btn{background:var(--bg2);border:1px solid var(--border);padding:6px 8px;border-radius:2px;color:var(--muted);cursor:pointer}
+    .btn:hover{color:var(--txt)}
+    .cell{margin:1rem 0;border:1px solid var(--border);border-radius:2px;background:var(--bg2)}
+    .cell-header{padding:.5rem 1rem;border-bottom:1px solid var(--border);color:var(--muted)}
+    .collapse-indicators{color:var(--muted);font-size:.85em;opacity:.9}
+    .cell-code{background:var(--code)}
+    .cell-code pre{margin:0;padding:.75rem;overflow-x:auto}
+    .cell-code.collapsed{display:none}
+    .cell-output{padding:.75rem;background:var(--bg)}
+    .cell-output.collapsed{display:none}
+    .cell-stdout{white-space:pre-wrap;background:var(--bg2);padding:.5rem;border-radius:2px}
+    .cell-stderr{white-space:pre-wrap;background:var(--errbg);border-left:2px solid var(--err);padding:.6rem;color:var(--err)}
+    .artifact{display:inline-block;border:1px solid var(--border);padding:.2rem .4rem;margin:.2rem .4rem .2rem 0;color:var(--link);text-decoration:none}
+    .artifact-preview img{max-width:100%;height:auto;border:1px solid var(--border)}
+    .cell-failed{border-color:var(--err)}
+    {{ pygments_css }}
+    {{ config.custom_css }}
+    .loading-skeleton{display:inline-block;height:12px;width:180px;background:linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12), rgba(0,0,0,0.06));background-size:200% 100%;animation:sk 1.2s linear infinite;margin-left:8px;border-radius:2px}
+    @keyframes sk{0%{background-position:0% 0}100%{background-position:200% 0}}
+  </style>
+</head>
+<body>
+  <div class=\"controls\"><button class=\"btn theme-toggle\" onclick=\"(function(){const h=document.documentElement;const t=h.getAttribute('data-theme');const n=t==='dark'?'light':'dark';h.setAttribute('data-theme',n);try{localStorage.setItem('uvnote-theme',n)}catch(_){}})()\">theme</button></div>
+  <main class=\"main-content\">{{ content|safe }}</main>
+</body>
+</html>"""
+
 
 def highlight_code(code: str, config: DocumentConfig) -> str:
     """Highlight Python code using Pygments."""
@@ -1824,7 +1937,7 @@ def highlight_code(code: str, config: DocumentConfig) -> str:
         nowrap=False,
         linenos=config.show_line_numbers,
         linenos_special=1,
-        cssclass="highlight"
+        cssclass="highlight",
     )
     return highlight(code, lexer, formatter)
 
@@ -1834,70 +1947,85 @@ def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) 
     cell_class = "cell"
     if not result.success:
         cell_class += " cell-failed"
-    
+
     html_parts = [f'<div class="{cell_class}">']
-    
+
     # Cell header
-    header_parts = [f'Cell: {cell.id}']
+    header_parts = [f"Cell: {cell.id}"]
     if cell.deps:
         header_parts.append(f'deps: {", ".join(cell.deps)}')
     if result.duration:
-        header_parts.append(f'{result.duration:.2f}s')
+        header_parts.append(f"{result.duration:.2f}s")
     if not result.success:
-        header_parts.append('FAILED')
-    
+        header_parts.append("FAILED")
+
     # Add collapse indicators to header
     code_indicator = "▶" if cell.collapse_code else "▼"
     output_indicator = "▶" if cell.collapse_output else "▼"
-    
+
     html_parts.append(f'<div class="cell-header">')
     html_parts.append(f'<span class="collapse-indicators">')
-    html_parts.append(f'<span onclick="toggleCode(\'{cell.id}\')" style="cursor: pointer;">{code_indicator} code</span> ')
-    html_parts.append(f'<span onclick="toggleOutput(\'{cell.id}\')" style="cursor: pointer;">{output_indicator} output</span>')
-    html_parts.append(f'</span> | ')
-    html_parts.append(' | '.join(header_parts))
-    html_parts.append('</div>')
-    
+    html_parts.append(
+        f'<span onclick="toggleCode(\'{cell.id}\')" style="cursor: pointer;">{code_indicator} code</span> '
+    )
+    html_parts.append(
+        f'<span onclick="toggleOutput(\'{cell.id}\')" style="cursor: pointer;">{output_indicator} output</span>'
+    )
+    html_parts.append(f"</span> | ")
+    html_parts.append(" | ".join(header_parts))
+    html_parts.append("</div>")
+
     # Cell code - handle collapse state
     code_class = "cell-code"
     if cell.collapse_code:
         code_class += " collapsed"
     html_parts.append(f'<div id="code-{cell.id}" class="{code_class}">')
     html_parts.append(highlighted_code)
-    html_parts.append('</div>')
-    
+    html_parts.append("</div>")
+
     # Cell output - handle collapse state
     output_class = "cell-output"
     if cell.collapse_output:
         output_class += " collapsed"
     html_parts.append(f'<div id="output-{cell.id}" class="{output_class}">')
-    
+
     if result.stdout:
-        html_parts.append(f'<div class="cell-stdout">{html.escape(result.stdout)}</div>')
-    
+        if getattr(result, "is_html", False):
+            html_parts.append(f'<div class="cell-stdout">{result.stdout}</div>')
+        else:
+            html_parts.append(
+                f'<div class="cell-stdout">{html.escape(result.stdout)}</div>'
+            )
+
     if result.stderr:
-        html_parts.append(f'<div class="cell-stderr">{html.escape(result.stderr)}</div>')
-    
+        html_parts.append(
+            f'<div class="cell-stderr">{html.escape(result.stderr)}</div>'
+        )
+
     if result.artifacts:
         html_parts.append('<div class="cell-artifacts">')
-        html_parts.append('<h4>Artifacts:</h4>')
-        
+        html_parts.append("<h4>Artifacts:</h4>")
+
         for artifact in result.artifacts:
-            html_parts.append(f'<a href="artifacts/{cell.id}/{artifact}" class="artifact" target="_blank">{artifact}</a>')
-        
+            html_parts.append(
+                f'<a href="artifacts/{cell.id}/{artifact}" class="artifact" target="_blank">{artifact}</a>'
+            )
+
         # Image previews
         for artifact in result.artifacts:
-            if artifact.endswith(('.png', '.jpg', '.jpeg')):
+            if artifact.endswith((".png", ".jpg", ".jpeg")):
                 html_parts.append('<div class="artifact-preview">')
-                html_parts.append(f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">')
-                html_parts.append('</div>')
-        
-        html_parts.append('</div>')
-    
-    html_parts.append('</div>')
-    html_parts.append('</div>')
-    
-    return '\n'.join(html_parts)
+                html_parts.append(
+                    f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
+                )
+                html_parts.append("</div>")
+
+        html_parts.append("</div>")
+
+    html_parts.append("</div>")
+    html_parts.append("</div>")
+
+    return "\n".join(html_parts)
 
 
 def generate_html(
@@ -1906,29 +2034,30 @@ def generate_html(
     cells: List[CodeCell],
     results: List[ExecutionResult],
     output_path: Path,
-    work_dir: Path
+    work_dir: Path,
 ) -> None:
     """Generate static HTML from markdown content and execution results."""
-    
+
     # Extract content without frontmatter for processing
     from .parser import parse_frontmatter
+
     _, content_without_frontmatter = parse_frontmatter(markdown_content)
-    
+
     # Convert markdown to HTML (excluding code blocks)
-    md = markdown.Markdown(extensions=['extra', 'codehilite'])
-    
+    md = markdown.Markdown(extensions=["extra", "codehilite"])
+
     # Prepare cell data for template
     results_by_id = {r.cell_id: r for r in results}
     cells_by_id = {cell.id: cell for cell in cells}
-    
+
     # Process markdown, replacing code blocks with rendered cells
     lines = content_without_frontmatter.splitlines()
     new_lines = []
     i = 0
-    
+
     while i < len(lines):
         # Check if this line starts a Python code block
-        if lines[i].strip().startswith('```python'):
+        if lines[i].strip().startswith("```python"):
             # Find matching cell
             cell_found = False
             for cell in cells:
@@ -1941,63 +2070,62 @@ def generate_html(
                         new_lines.append(cell_html)
                     cell_found = True
                     break
-            
+
             # Skip until we find the closing ```
-            while i < len(lines) and not lines[i].strip() == '```':
+            while i < len(lines) and not lines[i].strip() == "```":
                 i += 1
             i += 1  # Skip the closing ```
         else:
             new_lines.append(lines[i])
             i += 1
-    
+
     # Convert to HTML
-    clean_content = '\n'.join(new_lines)
+    clean_content = "\n".join(new_lines)
     content_html = md.convert(clean_content)
-    
+
     # Setup Jinja2 environment
     env = Environment(loader=BaseLoader())
-    template = env.from_string(HTML_TEMPLATE)
-    
+    # Choose full (feature-rich) template by default; opt into slim with env
+    use_slim = os.environ.get("UVNOTE_SLIM_HTML", "0") == "1"
+    template = env.from_string(HTML_TEMPLATE_SLIM if use_slim else HTML_TEMPLATE)
+
     # Get Pygments CSS for both themes
     # Dark theme CSS (use configured syntax theme)
     dark_formatter = HtmlFormatter(style=config.syntax_theme)
     dark_css = dark_formatter.get_style_defs('[data-theme="dark"] .highlight')
-    
+
     # Light theme CSS (use a light-friendly theme)
-    light_formatter = HtmlFormatter(style='default')
+    light_formatter = HtmlFormatter(style="default")
     light_css = light_formatter.get_style_defs('[data-theme="light"] .highlight')
-    
+
     # Combine both CSS
     pygments_css = f"{light_css}\n\n{dark_css}"
-    
+
     # Determine title
     title = config.title if config.title else output_path.stem
-    
+
     # Render HTML
     html = template.render(
-        title=title,
-        config=config,
-        content=content_html,
-        pygments_css=pygments_css
+        title=title, config=config, content=content_html, pygments_css=pygments_css
     )
-    
+
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Write HTML file
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(html)
-    
+
     # Copy artifacts to output directory
     artifacts_dir = output_path.parent / "artifacts"
     cache_dir = work_dir / ".uvnote" / "cache"
-    
+
     for result in results:
         if result.artifacts:
             result_cache_dir = cache_dir / result.cache_key
             target_dir = artifacts_dir / result.cell_id
             target_dir.mkdir(parents=True, exist_ok=True)
-            
+
             for artifact in result.artifacts:
                 src = result_cache_dir / artifact
                 dst = target_dir / artifact
