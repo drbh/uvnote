@@ -113,24 +113,93 @@ def build(
     incremental_callback = None
 
     if incremental:
+        # Prepare initial HTML with cached results where possible
+        from .executor import (
+            ExecutionResult,
+            check_all_cells_staleness,
+        )
+
+        staleness_summary = check_all_cells_staleness(cells, work_dir)
+
+        print("incremental_mode: preparing initial HTML with cached results")
+        initial_results = []
+        cached_initial_by_id = {}
+
+        import json
+
+        for cell in cells:
+            status = staleness_summary["cell_status"][cell.id]
+            if not status["stale"]:
+                cache_key = status["cache_key"]
+                cache_dir = work_dir / ".uvnote" / "cache" / cache_key
+                result_file = cache_dir / "result.json"
+                try:
+                    with open(result_file) as f:
+                        cached_result = json.load(f)
+
+                    artifacts = []
+                    if cache_dir.exists():
+                        for item in cache_dir.iterdir():
+                            if item.name not in {
+                                "result.json",
+                                "stdout.txt",
+                                "stderr.txt",
+                            }:
+                                artifacts.append(str(item.relative_to(cache_dir)))
+
+                    result = ExecutionResult(
+                        cell_id=cell.id,
+                        success=cached_result.get("success", True),
+                        stdout=cached_result.get("stdout", ""),
+                        stderr=cached_result.get("stderr", ""),
+                        duration=cached_result.get("duration", 0.0),
+                        artifacts=artifacts,
+                        cache_key=cache_key,
+                    )
+                    initial_results.append(result)
+                    cached_initial_by_id[cell.id] = result
+                    print(f"  {cell.id}=cached")
+                except Exception:
+                    placeholder = ExecutionResult(
+                        cell_id=cell.id,
+                        success=True,
+                        stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                        stderr="",
+                        duration=0.0,
+                        artifacts=[],
+                        cache_key="loading",
+                        is_html=True,
+                    )
+                    initial_results.append(placeholder)
+                    print(f"  {cell.id}=loading (cache_error)")
+            else:
+                placeholder = ExecutionResult(
+                    cell_id=cell.id,
+                    success=True,
+                    stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                    stderr="",
+                    duration=0.0,
+                    artifacts=[],
+                    cache_key="loading",
+                    is_html=True,
+                )
+                initial_results.append(placeholder)
+                print(f"  {cell.id}=loading ({status['reason']})")
 
         def update_html(partial_results):
             try:
-                # Create mixed results: partial results + loading placeholders for remaining cells
                 mixed_results = []
                 completed_cell_ids = {r.cell_id for r in partial_results}
 
                 for cell in cells:
                     if cell.id in completed_cell_ids:
-                        # Use actual result
                         result = next(
                             r for r in partial_results if r.cell_id == cell.id
                         )
                         mixed_results.append(result)
+                    elif cell.id in cached_initial_by_id:
+                        mixed_results.append(cached_initial_by_id[cell.id])
                     else:
-                        # Create loading placeholder
-                        from .executor import ExecutionResult
-
                         placeholder = ExecutionResult(
                             cell_id=cell.id,
                             success=True,
@@ -152,29 +221,11 @@ def build(
 
         incremental_callback = update_html
 
-        # Generate initial loading HTML
-        print("incremental_mode: generating initial loading HTML")
-        from .executor import ExecutionResult
-
-        loading_results = []
-        for cell in cells:
-            placeholder = ExecutionResult(
-                cell_id=cell.id,
-                success=True,
-                stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
-                stderr="",
-                duration=0.0,
-                artifacts=[],
-                cache_key="loading",
-                is_html=True,
-            )
-            loading_results.append(placeholder)
-
         try:
             generate_html(
-                content, config, cells, loading_results, output_file, work_dir
+                content, config, cells, initial_results, output_file, work_dir
             )
-            print(f"  initial_loading: {output_file}")
+            print(f"  initial: {output_file}")
         except Exception as e:
             click.echo(f"Error generating initial HTML: {e}", err=True)
 
