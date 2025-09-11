@@ -9,8 +9,8 @@ from typing import List
 import markdown
 from jinja2 import Environment, BaseLoader
 from pygments import highlight
-from pygments.formatters import HtmlFormatter
-from pygments.lexers import PythonLexer
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers.python import PythonLexer
 
 from .executor import ExecutionResult
 from .parser import CodeCell, DocumentConfig

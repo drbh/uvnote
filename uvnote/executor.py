@@ -8,7 +8,7 @@ import tempfile
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set, Callable
 
 from .parser import CodeCell
 from .cache import (
@@ -511,7 +511,7 @@ def execute_cells(
     use_cache: bool = True,
     env_vars: Optional[Dict[str, str]] = None,
     force_rerun_cells: Optional[Set[str]] = None,
-    incremental_callback: Optional[callable] = None,
+    incremental_callback: Optional[Callable[[List["ExecutionResult"]], None]] = None,
 ) -> List[ExecutionResult]:
     """Execute multiple cells in true topological dependency order.
 
