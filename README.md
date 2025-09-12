@@ -39,7 +39,9 @@ okay, so the core concept is simple (embed uv scripts in markdown), but there ar
 Currently, the recommended way to use `uvnote` is to directly run the script from GitHub using `uvx`, this will download and run the latest version of `uvnote` without needing to install anything until we have a proper release.
 
 ```bash
-uvx https://github.com/drbh/uvnote.git
+uvx uvnote
+# Latest version
+# uvx https://github.com/drbh/uvnote.git
 ```
 
 outputs
@@ -47,23 +49,27 @@ outputs
 ```text
 Usage: uvnote [OPTIONS] COMMAND [ARGS]...
 
-  uvnote: Stateless, deterministic notebooks with uv and
-  Markdown.
+  uvnote: Stateless, deterministic notebooks with uv and Markdown.
 
 Options:
   --version  Show the version and exit.
   --help     Show this message and exit.
 
 Commands:
-  build  Build static HTML from markdown file.
-  clean  Clear cache and site files.
-  run    Run a single cell from markdown file.
-  serve  Watch markdown file, rebuild on changes, and...
+  build          Build static HTML from markdown file.
+  build-loading  Build HTML with loading placeholders for stale cells.
+  cache-prune    Prune cache to target size using LRU eviction.
+  clean          Clear cache and site files.
+  export         Export cell files and their dependencies to a directory.
+  graph          Show dependency graph for markdown file.
+  run            Run cells from markdown file.
+  serve          Watch markdown file, rebuild on changes, and serve HTML...
 ```
 
 ### Preview
 
-
+> [!NOTE]
+> the vscode extension may be deprecated in the future as uvnote as the serve command can be used to serve a live preview.
 
 If you're a `vscode` user, you can use the `uvnote-preview` extension to preview your uvnote files directly in VSCode.
 
