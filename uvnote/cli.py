@@ -12,6 +12,7 @@ from watchdog.observers import Observer
 from .executor import execute_cells
 from .generator import generate_html
 from .parser import parse_markdown, validate_cells
+from .server import Broadcaster, create_app
 from .cache import evict_to_target, get_cache_cap_bytes, get_total_size_bytes, init_db
 
 
@@ -30,7 +31,7 @@ class MarkdownHandler(FileSystemEventHandler):
         if Path(event.src_path).resolve() == self.file_path.resolve():
             # Debounce rapid file changes
             now = time.time()
-            if now - self.last_modified > 0.5:
+            if now - self.last_modified > 0.1:
                 self.last_modified = now
                 self.callback()
 
@@ -72,6 +73,8 @@ def build(
 
     if output is None:
         output = Path("site")
+
+    assert output is not None  # Help type checker understand output is not None
 
     work_dir = Path.cwd()
 
@@ -129,7 +132,8 @@ def build(
 
         for cell in cells:
             status = staleness_summary["cell_status"][cell.id]
-            if not status["stale"]:
+            # If --rerun is used, treat all cells as stale for initial display
+            if not status["stale"] and not rerun:
                 cache_key = status["cache_key"]
                 cache_dir = work_dir / ".uvnote" / "cache" / cache_key
                 result_file = cache_dir / "result.json"
@@ -184,7 +188,8 @@ def build(
                     is_html=True,
                 )
                 initial_results.append(placeholder)
-                print(f"  {cell.id}=loading ({status['reason']})")
+                reason = "rerun" if not status["stale"] and rerun else status["reason"]
+                print(f"  {cell.id}=loading ({reason})")
 
         def update_html(partial_results):
             try:
@@ -493,6 +498,8 @@ def build_loading(file: Path, output: Optional[Path]):
     if output is None:
         output = Path("site")
 
+    assert output is not None  # Help type checker understand output is not None
+
     work_dir = Path.cwd()
 
     # Read markdown file
@@ -750,59 +757,206 @@ def cache_prune(size: str | None):
 @click.option("--port", default=8000, type=int, help="Port to serve on")
 @click.option("--no-cache", is_flag=True, help="Disable caching")
 def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bool):
-    """Watch markdown file, rebuild on changes, and serve HTML."""
+    """Watch markdown file, rebuild on changes, and serve HTML (Flask)."""
 
     if output is None:
         output = Path("site")
 
+    assert output is not None  # Help type checker understand output is not None
     output_file = output / f"{file.stem}.html"
 
+    broadcaster = Broadcaster()
+
     def rebuild():
-        """Rebuild the HTML file."""
         click.echo(f"Rebuilding {file}...")
         try:
-            # Use click.Context to call build command
-            ctx = click.Context(build)
-            ctx.invoke(build, file=file, output=output, no_cache=no_cache)
+            with open(file) as f:
+                content = f.read()
+            config, cells = parse_markdown(content)
+            validate_cells(cells)
+
+            # Prepare initial results from cache or placeholders so nothing disappears
+            from .executor import ExecutionResult, check_all_cells_staleness
+            import json
+
+            work_dir = Path.cwd()
+            staleness = check_all_cells_staleness(cells, work_dir)
+            initial_results = []
+            cached_initial_by_id = {}
+
+            for cell in cells:
+                status = staleness["cell_status"][cell.id]
+                if status["stale"] or no_cache:
+                    placeholder = ExecutionResult(
+                        cell_id=cell.id,
+                        success=True,
+                        stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                        stderr="",
+                        duration=0.0,
+                        artifacts=[],
+                        cache_key="loading",
+                        is_html=True,
+                    )
+                    initial_results.append(placeholder)
+                    reason = "no_cache" if no_cache else status["reason"]
+                    print(f"  {cell.id}=loading ({reason})")
+                else:
+                    cache_key = status["cache_key"]
+                    cache_dir = work_dir / ".uvnote" / "cache" / cache_key
+                    try:
+                        with open(cache_dir / "result.json") as rf:
+                            cached = json.load(rf)
+                        artifacts = []
+                        if cache_dir.exists():
+                            for item in cache_dir.iterdir():
+                                if item.name not in {
+                                    "result.json",
+                                    "stdout.txt",
+                                    "stderr.txt",
+                                }:
+                                    artifacts.append(str(item.relative_to(cache_dir)))
+                        res = ExecutionResult(
+                            cell_id=cell.id,
+                            success=cached.get("success", True),
+                            stdout=cached.get("stdout", ""),
+                            stderr=cached.get("stderr", ""),
+                            duration=cached.get("duration", 0.0),
+                            artifacts=artifacts,
+                            cache_key=cache_key,
+                        )
+                        initial_results.append(res)
+                        cached_initial_by_id[cell.id] = res
+                        print(f"  {cell.id}=cached")
+                    except Exception:
+                        placeholder = ExecutionResult(
+                            cell_id=cell.id,
+                            success=True,
+                            stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                            stderr="",
+                            duration=0.0,
+                            artifacts=[],
+                            cache_key="loading",
+                            is_html=True,
+                        )
+                        initial_results.append(placeholder)
+                        print(f"  {cell.id}=loading (cache_error)")
+
+            # Render initial HTML so unchanged cells remain visible
+            generate_html(
+                content,
+                config,
+                cells,
+                initial_results,
+                output_file,  # Use output_file which is already Path
+                work_dir,
+            )
+            print(f"  initial: {output_file}")
+
+            # Incremental updates merge new results with existing cached/placeholder ones
+            def incremental_reload_callback(partial_results):
+                try:
+                    mixed = []
+                    completed = {r.cell_id for r in partial_results}
+                    for cell in cells:
+                        if cell.id in completed:
+                            mixed.append(
+                                next(r for r in partial_results if r.cell_id == cell.id)
+                            )
+                        elif cell.id in cached_initial_by_id:
+                            mixed.append(cached_initial_by_id[cell.id])
+                        else:
+                            # Fallback placeholder
+                            mixed.append(
+                                ExecutionResult(
+                                    cell_id=cell.id,
+                                    success=True,
+                                    stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                                    stderr="",
+                                    duration=0.0,
+                                    artifacts=[],
+                                    cache_key="loading",
+                                    is_html=True,
+                                )
+                            )
+                    generate_html(
+                        content,
+                        config,
+                        cells,
+                        mixed,
+                        output_file,  # Use output_file which is already Path
+                        work_dir,
+                    )
+                    broadcaster.broadcast("incremental")
+                except Exception as e:
+                    print(f"Incremental update error: {e}")
+
+            # Execute cells
+            results = execute_cells(
+                cells,
+                work_dir=work_dir,
+                use_cache=not no_cache,
+                incremental_callback=incremental_reload_callback,
+            )
+
+            # Final HTML and broadcast
+            generate_html(content, config, cells, results, output_file, work_dir)
             click.echo(f"Rebuilt: {output_file}")
+            broadcaster.broadcast("reload")
         except Exception as e:
             click.echo(f"Rebuild failed: {e}", err=True)
 
     # Initial build
     rebuild()
 
-    # Setup file watcher
+    # Watch source file
     event_handler = MarkdownHandler(file, rebuild)
     observer = Observer()
     observer.schedule(event_handler, str(file.parent), recursive=False)
     observer.start()
 
-    # Start simple HTTP server
+    # Start Flask app
+    import threading
+    import webbrowser
+    from flask import jsonify  # type: ignore[import-not-found]
+
+    app = create_app(output, output_file.name, broadcaster)
+    click.echo(f"Static root: {output.resolve()}")
+
+    @app.post("/run/<cell_id>")
+    def run_cell(cell_id: str):  # type: ignore[unused-variable]
+        try:
+            with open(file) as f:
+                content = f.read()
+            from uvnote.parser import parse_markdown, validate_cells
+            from uvnote.executor import execute_cell
+
+            config, cells = parse_markdown(content)
+            validate_cells(cells)
+            target = next((c for c in cells if c.id == cell_id), None)
+            if not target:
+                return jsonify({"error": f"Cell {cell_id} not found"}), 404
+
+            # Respond immediately; execute in background without cache
+            def _bg_exec():
+                try:
+                    execute_cell(target, Path.cwd(), use_cache=False)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg_exec, daemon=True).start()
+            return jsonify({"success": True, "status": "executing", "cell_id": cell_id})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    url = f"http://{host}:{port}/{output_file.name}"
+    click.echo(f"Serving at {url}")
+    click.echo("Press Ctrl+C to stop")
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
     try:
-        import http.server
-        import socketserver
-        import threading
-        import webbrowser
-
-        class Handler(http.server.SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(output), **kwargs)
-
-        with socketserver.TCPServer((host, port), Handler) as httpd:
-            url = f"http://{host}:{port}/{output_file.name}"
-            click.echo(f"Serving at {url}")
-            click.echo("Press Ctrl+C to stop")
-
-            # Open browser
-            threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-
-            try:
-                httpd.serve_forever()
-            except KeyboardInterrupt:
-                pass
-
-    except Exception as e:
-        click.echo(f"Server error: {e}", err=True)
+        app.run(host=host, port=port, threaded=True, use_reloader=False, debug=False)
+    except KeyboardInterrupt:
+        pass
     finally:
         observer.stop()
         observer.join()
@@ -822,6 +976,8 @@ def export(file: Path, cell: Optional[str], output: Optional[Path]):
 
     if output is None:
         output = Path("export")
+
+    assert output is not None  # Help type checker understand output is not None
 
     # Read and parse markdown
     try:

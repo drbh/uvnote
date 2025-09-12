@@ -450,12 +450,81 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border: 1px solid var(--border-primary);
             border-radius: 1px;
         }
+        .artifact-preview svg {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid var(--border-primary);
+            border-radius: 1px;
+            display: block;
+        }
+        /* Style SVG text elements */
+        .artifact-preview svg g {
+            fill: var(--text-primary) !important;
+        }
+        /* Auto-theme SVG elements */
+        .artifact-preview svg {
+            background: transparent;
+        }
         .cell-failed {
             border-color: var(--border-cell-failed);
         }
         .cell-failed .cell-header {
             background: var(--bg-error);
             color: var(--text-error);
+        }
+        .run-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            padding: 2px 6px;
+            border-radius: 2px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.75em;
+            font-family: inherit;
+            margin-left: 4px;
+        }
+        .run-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-primary);
+        }
+        .run-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .copy-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            padding: 2px 6px;
+            border-radius: 2px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.75em;
+            font-family: inherit;
+            margin-left: 4px;
+        }
+        .copy-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-primary);
+        }
+        .copy-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .output-stale {
+            opacity: 0.5;
+            position: relative;
+        }
+        .output-stale::after {
+            content: '⏳ updating...';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: var(--bg-secondary);
+            padding: 4px 8px;
+            border-radius: 2px;
+            font-size: 0.75em;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-primary);
         }
         h1, h2, h3, h4, h5, h6 {
             margin-top: 1.5rem;
@@ -1837,6 +1906,137 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (fe && fe.parentNode) fe.parentNode.removeChild(fe);
         }
 
+        function runCell(cellId){
+            const btn=document.querySelector('.run-btn[onclick*="'+cellId+'"]');
+            const output=document.getElementById('output-'+cellId);
+            if(btn){btn.textContent='⏳ running...';btn.disabled=true;}
+            if(output){output.classList.add('output-stale');}
+            fetch('/run/'+cellId,{method:'POST'}).then(r=>r.json()).then(data=>{
+                if(output){
+                    output.classList.remove('output-stale');
+                    let html='';
+                    if(data.stdout) html+='<div class="cell-stdout">'+data.stdout+'</div>';
+                    if(data.stderr) html+='<div class="cell-stderr">'+data.stderr+'</div>';
+                    output.innerHTML=html;
+                }
+                if(btn){btn.textContent='▶ run';btn.disabled=false;}
+            }).catch(e=>{
+                console.error('Run failed:',e);
+                if(output){output.classList.remove('output-stale');}
+                if(btn){btn.textContent='▶ run';btn.disabled=false;}
+            });
+        }
+
+        function copyCell(cellId){
+            console.log('copyCell called with cellId:', cellId);
+            
+            // Try multiple selectors to find the code element
+            let codeElement = document.querySelector('#code-'+cellId+' code');
+            if (!codeElement) {
+                codeElement = document.querySelector('#code-'+cellId+' pre code');
+            }
+            if (!codeElement) {
+                codeElement = document.querySelector('#code-'+cellId+' .highlight code');
+            }
+            if (!codeElement) {
+                // Try finding any code element within the cell
+                const codeDiv = document.getElementById('code-'+cellId);
+                if (codeDiv) {
+                    codeElement = codeDiv.querySelector('code');
+                }
+            }
+            
+            const btn = document.querySelector('.copy-btn[onclick*="'+cellId+'"]');
+            
+            console.log('Found codeElement:', codeElement);
+            console.log('Found btn:', btn);
+            console.log('Code div structure:', document.getElementById('code-'+cellId));
+            
+            if (!codeElement) {
+                console.error('Code element not found for cell:', cellId);
+                // Log the actual structure for debugging
+                const codeDiv = document.getElementById('code-'+cellId);
+                if (codeDiv) {
+                    console.log('Code div HTML:', codeDiv.innerHTML);
+                }
+                return;
+            }
+            if (!btn) {
+                console.error('Copy button not found for cell:', cellId);
+                return;
+            }
+            
+            const codeText = codeElement.textContent;
+            console.log('Code text to copy:', codeText ? codeText.substring(0, 50) + '...' : 'empty');
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(codeText).then(function() {
+                    console.log('Clipboard copy successful');
+                    btn.textContent = '✓ Copied!';
+                    btn.classList.add('copied');
+                    setTimeout(function() {
+                        btn.textContent = 'Copy';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                }).catch(function(err) {
+                    console.warn('Clipboard copy failed:', err);
+                    fallbackCopy();
+                });
+            } else {
+                console.log('Using fallback copy method');
+                fallbackCopy();
+            }
+            
+            function fallbackCopy() {
+                const textarea = document.createElement('textarea');
+                textarea.value = codeText;
+                textarea.style.position = 'absolute';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    const success = document.execCommand('copy');
+                    console.log('Fallback copy success:', success);
+                    btn.textContent = '✓ Copied!';
+                    btn.classList.add('copied');
+                    setTimeout(function() {
+                        btn.textContent = 'Copy';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                } catch (err) {
+                    console.error('Fallback copy failed:', err);
+                    btn.textContent = 'Copy failed';
+                    setTimeout(function() {
+                        btn.textContent = 'Copy';
+                    }, 2000);
+                }
+                document.body.removeChild(textarea);
+            }
+        }
+
+        // Live reload functionality (robust SSE handling)
+        (function(){
+            if (!('EventSource' in window)) {
+                console.warn('SSE not supported in this browser');
+                return;
+            }
+            let source = new EventSource('/events');
+            let isOpen = false;
+            source.onopen = function(){ isOpen = true; console.log('SSE connected'); };
+            source.onmessage = function(e){
+                const msg=(e.data||'').trim(); if(!msg) return;
+                console.log('SSE message:', msg);
+                if (msg==='reload' || msg==='incremental') { location.reload(); }
+                // Ignore 'loading' to avoid premature reload loops
+            };
+            source.onerror = function(e){
+                // Let EventSource auto-reconnect instead of forcing a reload
+                if (isOpen) console.warn('SSE error after open, retrying...', e);
+            };
+            window.addEventListener('beforeunload', function(){ try{source.close();}catch(_){} });
+        })();
+
+
         document.addEventListener('DOMContentLoaded', function() {
             updateThemeIcon();
             initMinimap();
@@ -1895,6 +2095,74 @@ HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
       if(spans[0]) spans[0].textContent=(codeCollapsed?'\u25b6':'\u25bc')+' code';
       if(spans[1]) spans[1].textContent=(outCollapsed?'\u25b6':'\u25bc')+' output';
     }
+    function runCell(cellId){
+      const btn=document.querySelector('.run-btn[onclick*="'+cellId+'"]');
+      const output=document.getElementById('output-'+cellId);
+      if(btn){btn.textContent='⏳ running...';btn.disabled=true;}
+      if(output){output.classList.add('output-stale');}
+      fetch('/run/'+cellId,{method:'POST'}).then(r=>r.json()).then(data=>{
+        if(output){
+          output.classList.remove('output-stale');
+          let html='';
+          if(data.stdout) html+='<div class="cell-stdout">'+data.stdout+'</div>';
+          if(data.stderr) html+='<div class="cell-stderr">'+data.stderr+'</div>';
+          output.innerHTML=html;
+        }
+        if(btn){btn.textContent='▶ run';btn.disabled=false;}
+      }).catch(e=>{
+        console.error('Run failed:',e);
+        if(output){output.classList.remove('output-stale');}
+        if(btn){btn.textContent='▶ run';btn.disabled=false;}
+      });
+    }
+    function copyCell(cellId){
+      console.log('copyCell called with cellId:', cellId);
+      let codeElement=document.querySelector('#code-'+cellId+' code');
+      if(!codeElement) codeElement=document.querySelector('#code-'+cellId+' pre code');
+      if(!codeElement) codeElement=document.querySelector('#code-'+cellId+' .highlight code');
+      if(!codeElement){
+        const codeDiv=document.getElementById('code-'+cellId);
+        if(codeDiv) codeElement=codeDiv.querySelector('code');
+      }
+      const btn=document.querySelector('.copy-btn[onclick*="'+cellId+'"]');
+      console.log('Found codeElement:', codeElement, 'Found btn:', btn);
+      if(!codeElement||!btn) return;
+      const codeText=codeElement.textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(codeText).then(function(){
+          btn.textContent='✓ Copied!';btn.classList.add('copied');
+          setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
+        }).catch(function(){fallbackCopy();});
+      }else{fallbackCopy();}
+      function fallbackCopy(){
+        const textarea=document.createElement('textarea');
+        textarea.value=codeText;textarea.style.position='absolute';textarea.style.left='-9999px';
+        document.body.appendChild(textarea);textarea.select();
+        try{
+          document.execCommand('copy');
+          btn.textContent='✓ Copied!';btn.classList.add('copied');
+          setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
+        }catch(err){
+          btn.textContent='Copy failed';
+          setTimeout(function(){btn.textContent='Copy';},2000);
+        }
+        document.body.removeChild(textarea);
+      }
+    }
+    // Live reload functionality (robust SSE handling)
+    (function(){
+      if(!('EventSource' in window)){console.warn('SSE not supported');return;}
+      let source=new EventSource('/events');
+      let isOpen=false;
+      source.onopen=function(){isOpen=true;console.log('SSE connected');};
+      source.onmessage=function(e){
+        const msg=(e.data||'').trim(); if(!msg) return;
+        console.log('SSE message:', msg);
+        if(msg==='reload'||msg==='incremental'){location.reload();}
+      };
+      source.onerror=function(e){ if(isOpen) console.warn('SSE error, auto-retry', e); };
+      window.addEventListener('beforeunload', function(){ try{source.close();}catch(_){} });
+    })();
   </script>
   <style>
     :root[data-theme=\"light\"]{--bg:#fff;--bg2:#f6f8fa;--code:#f8f9fa;--txt:#333;--muted:#656d76;--link:#0969da;--errbg:#fdf2f2;--err:#c53030;--border:#e1e5e9}
@@ -1915,11 +2183,23 @@ HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
     .cell-stderr{white-space:pre-wrap;background:var(--errbg);border-left:2px solid var(--err);padding:.6rem;color:var(--err)}
     .artifact{display:inline-block;border:1px solid var(--border);padding:.2rem .4rem;margin:.2rem .4rem .2rem 0;color:var(--link);text-decoration:none}
     .artifact-preview img{max-width:100%;height:auto;border:1px solid var(--border)}
+    .artifact-preview svg{max-width:100%;height:auto;border:1px solid var(--border);display:block;background:transparent}
+    .artifact-preview svg text{fill:var(--txt)}
+    .artifact-preview svg *[fill="black"]{fill:var(--txt)}
+    .artifact-preview svg *[fill="white"]{fill:var(--bg)}
+    .artifact-preview svg *[stroke="black"]{stroke:var(--txt)}
+    .artifact-preview svg *[stroke="white"]{stroke:var(--bg)}
     .cell-failed{border-color:var(--err)}
     {{ pygments_css }}
     {{ config.custom_css }}
     .loading-skeleton{display:inline-block;height:12px;width:180px;background:linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12), rgba(0,0,0,0.06));background-size:200% 100%;animation:sk 1.2s linear infinite;margin-left:8px;border-radius:2px}
     @keyframes sk{0%{background-position:0% 0}100%{background-position:200% 0}}
+    .run-btn{background:var(--bg2);border:1px solid var(--border);padding:2px 6px;border-radius:2px;color:var(--muted);cursor:pointer;font-size:0.85em}
+    .run-btn:hover{color:var(--txt);background:var(--bg)}
+    .copy-btn{background:var(--bg2);border:1px solid var(--border);padding:2px 6px;border-radius:2px;color:var(--muted);cursor:pointer;font-size:0.75em;margin-left:4px}
+    .copy-btn:hover{color:var(--txt);background:var(--bg)}
+    .output-stale{opacity:0.5;position:relative}
+    .output-stale::after{content:'⏳ updating...';position:absolute;top:8px;right:8px;background:var(--bg2);padding:2px 6px;border-radius:2px;font-size:0.8em;color:var(--muted);border:1px solid var(--border)}
   </style>
 </head>
 <body>
@@ -1942,7 +2222,9 @@ def highlight_code(code: str, config: DocumentConfig) -> str:
     return highlight(code, lexer, formatter)
 
 
-def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) -> str:
+def render_cell(
+    cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path
+) -> str:
     """Render a single cell as HTML."""
     cell_class = "cell"
     if not result.success:
@@ -1973,6 +2255,12 @@ def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) 
     )
     html_parts.append(f"</span> | ")
     html_parts.append(" | ".join(header_parts))
+    html_parts.append(
+        f' | <button class="run-btn" onclick="runCell(\'{cell.id}\')">▶ run</button>'
+    )
+    html_parts.append(
+        f'<button class="copy-btn" onclick="copyCell(\'{cell.id}\')">Copy</button>'
+    )
     html_parts.append("</div>")
 
     # Cell code - handle collapse state
@@ -2012,6 +2300,7 @@ def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) 
             )
 
         # Image previews
+        cache_dir = work_dir / ".uvnote" / "cache"
         for artifact in result.artifacts:
             if artifact.endswith((".png", ".jpg", ".jpeg")):
                 html_parts.append('<div class="artifact-preview">')
@@ -2019,6 +2308,31 @@ def render_cell(cell: CodeCell, result: ExecutionResult, highlighted_code: str) 
                     f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
                 )
                 html_parts.append("</div>")
+            elif artifact.endswith(".svg"):
+                # Read and embed SVG content directly
+                svg_path = cache_dir / result.cache_key / artifact
+                if svg_path.exists():
+                    try:
+                        svg_content = svg_path.read_text()
+                        # Basic validation that it's an SVG
+                        if "<svg" in svg_content and "</svg>" in svg_content:
+                            html_parts.append('<div class="artifact-preview">')
+                            html_parts.append(svg_content)
+                            html_parts.append("</div>")
+                        else:
+                            # Fallback to img tag if not valid SVG
+                            html_parts.append('<div class="artifact-preview">')
+                            html_parts.append(
+                                f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
+                            )
+                            html_parts.append("</div>")
+                    except Exception:
+                        # Fallback to img tag on error
+                        html_parts.append('<div class="artifact-preview">')
+                        html_parts.append(
+                            f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
+                        )
+                        html_parts.append("</div>")
 
         html_parts.append("</div>")
 
@@ -2066,7 +2380,9 @@ def generate_html(
                     result = results_by_id.get(cell.id)
                     if result:
                         highlighted_code = highlight_code(cell.code, config)
-                        cell_html = render_cell(cell, result, highlighted_code)
+                        cell_html = render_cell(
+                            cell, result, highlighted_code, work_dir
+                        )
                         new_lines.append(cell_html)
                     cell_found = True
                     break
@@ -2112,9 +2428,17 @@ def generate_html(
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write HTML file
-    with open(output_path, "w") as f:
+    # Write HTML atomically to avoid clients reading a partially-written file
+    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    with open(tmp_path, "w") as f:
         f.write(html)
+        try:
+            f.flush()
+            os.fsync(f.fileno())
+        except Exception:
+            # fsync best-effort; ignore on platforms/filesystems that don't support it
+            pass
+    os.replace(tmp_path, output_path)
 
     # Copy artifacts to output directory
     artifacts_dir = output_path.parent / "artifacts"
@@ -2131,6 +2455,9 @@ def generate_html(
                 dst = target_dir / artifact
                 if src.exists():
                     if src.is_file():
-                        shutil.copy2(src, dst)
+                        # Copy atomically to avoid serving partial files
+                        tmp_dst = dst.with_suffix(dst.suffix + ".tmp")
+                        shutil.copy2(src, tmp_dst)
+                        tmp_dst.replace(dst)
                     else:
                         shutil.copytree(src, dst, dirs_exist_ok=True)
