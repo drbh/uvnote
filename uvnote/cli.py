@@ -44,6 +44,41 @@ def main():
 
 
 @main.command()
+@click.option(
+    "--name",
+    "-n",
+    default="note.md",
+    help="Name of the markdown file to create",
+)
+def init(name: str):
+    """Initialize a new uvnote project with a markdown file containing a Python block."""
+    file_path = Path(name)
+    
+    if file_path.exists():
+        click.echo(f"Error: {name} already exists", err=True)
+        return 1
+    
+    # Create the markdown file with a Python code block
+    content = """# New Note
+
+This is a new uvnote markdown file.
+
+```python
+# Your Python code here
+print("Hello, uvnote!")
+```
+"""
+    
+    try:
+        file_path.write_text(content)
+        click.echo(f"Created {name}")
+        return 0
+    except Exception as e:
+        click.echo(f"Error creating {name}: {e}", err=True)
+        return 1
+
+
+@main.command()
 @click.argument("file", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--output",
