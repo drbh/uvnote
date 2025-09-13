@@ -1,7 +1,9 @@
 """CLI commands for uvnote."""
 
 import shutil
+import tempfile
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +18,46 @@ from .server import Broadcaster, create_app
 from .cache import evict_to_target, get_cache_cap_bytes, get_total_size_bytes, init_db
 from .logging_config import setup_logging, get_logger
 from .rebuild_queue import RebuildQueueManager
+
+
+def resolve_file_path(file_input: str) -> Path:
+    """
+    Resolve file path, downloading from URL if it starts with https.
+    
+    Args:
+        file_input: File path or HTTPS URL
+        
+    Returns:
+        Path to local file (possibly in temp directory)
+    """
+    if file_input.startswith("https://"):
+        logger = get_logger("cli")
+        logger.info(f"Downloading file from {file_input}")
+        
+        try:
+            # Create temp directory for downloaded files
+            temp_dir = Path(tempfile.mkdtemp(prefix="uvnote_"))
+            
+            # Extract filename from URL or use default
+            url_path = file_input.split('/')[-1]
+            if not url_path or not url_path.endswith('.md'):
+                filename = "downloaded.md"
+            else:
+                filename = url_path
+                
+            temp_file = temp_dir / filename
+            
+            # Download the file
+            urllib.request.urlretrieve(file_input, temp_file)
+            logger.info(f"Downloaded to {temp_file}")
+            
+            return temp_file
+            
+        except Exception as e:
+            raise click.ClickException(f"Failed to download {file_input}: {e}")
+    
+    # Regular file path
+    return Path(file_input)
 
 
 class MarkdownHandler(FileSystemEventHandler):
@@ -103,7 +145,7 @@ print("Hello, uvnote!")
 
 
 @main.command()
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file")
 @click.option(
     "--output",
     "-o",
@@ -121,7 +163,7 @@ print("Hello, uvnote!")
     "--incremental", is_flag=True, help="Update HTML after each cell execution"
 )
 def build(
-    file: Path,
+    file: str,
     output: Optional[Path],
     no_cache: bool,
     rerun: bool,
@@ -129,17 +171,20 @@ def build(
     incremental: bool,
 ):
     """Build static HTML from markdown file."""
+    
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
 
     if output is None:
         output = Path("site")
 
     assert output is not None  # Help type checker understand output is not None
 
-    work_dir = Path.cwd()
+    work_dir = resolved_file.parent
 
     # Read markdown file
     try:
-        with open(file) as f:
+        with open(resolved_file) as f:
             content = f.read()
     except Exception as e:
         click.echo(f"Error reading file: {e}", err=True)
@@ -172,7 +217,7 @@ def build(
         logger.info("")
 
     # Set up incremental callback if needed
-    output_file = output / f"{file.stem}.html"
+    output_file = output / f"{resolved_file.stem}.html"
     incremental_callback = None
 
     if incremental:
@@ -332,7 +377,7 @@ def build(
 
 
 @main.command()
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file", type=str)
 @click.option("--cell", help="Cell ID to run (if not specified, runs all cells)")
 @click.option("--no-cache", is_flag=True, help="Disable caching")
 @click.option("--rerun", is_flag=True, help="Force rerun even if cached")
@@ -343,7 +388,7 @@ def build(
     "--check", is_flag=True, help="Check which cells are stale without executing"
 )
 def run(
-    file: Path,
+    file: str,
     cell: Optional[str],
     no_cache: bool,
     rerun: bool,
@@ -351,12 +396,14 @@ def run(
     check: bool,
 ):
     """Run cells from markdown file."""
-
-    work_dir = Path.cwd()
+    
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
+    work_dir = resolved_file.parent
 
     # Read and parse markdown
     try:
-        with open(file) as f:
+        with open(resolved_file) as f:
             content = f.read()
 
         config, cells = parse_markdown(content)
@@ -550,26 +597,29 @@ def run(
 
 
 @main.command("build-loading")
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file", type=str)
 @click.option(
     "--output",
     "-o",
     type=click.Path(path_type=Path),
     help="Output directory (default: site/)",
 )
-def build_loading(file: Path, output: Optional[Path]):
+def build_loading(file: str, output: Optional[Path]):
     """Build HTML with loading placeholders for stale cells."""
+    
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
 
     if output is None:
         output = Path("site")
 
     assert output is not None  # Help type checker understand output is not None
 
-    work_dir = Path.cwd()
+    work_dir = resolved_file.parent
 
     # Read markdown file
     try:
-        with open(file) as f:
+        with open(resolved_file) as f:
             content = f.read()
     except Exception as e:
         click.echo(f"Error reading file: {e}", err=True)
@@ -666,7 +716,7 @@ def build_loading(file: Path, output: Optional[Path]):
         results.append(result)
 
     # Generate HTML
-    output_file = output / f"{file.stem}.html"
+    output_file = output / f"{resolved_file.stem}.html"
     try:
         from .generator import generate_html
 
@@ -680,13 +730,16 @@ def build_loading(file: Path, output: Optional[Path]):
 
 
 @main.command()
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
-def graph(file: Path):
+@click.argument("file", type=str)
+def graph(file: str):
     """Show dependency graph for markdown file."""
+    
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
 
     # Read and parse markdown
     try:
-        with open(file) as f:
+        with open(resolved_file) as f:
             content = f.read()
 
         from .parser import parse_markdown, validate_cells
@@ -814,7 +867,7 @@ def cache_prune(size: str | None):
 
 
 @main.command()
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file")
 @click.option(
     "--output",
     "-o",
@@ -824,23 +877,26 @@ def cache_prune(size: str | None):
 @click.option("--host", default="localhost", help="Host to serve on")
 @click.option("--port", default=8000, type=int, help="Port to serve on")
 @click.option("--no-cache", is_flag=True, help="Disable caching")
-def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bool):
+def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: bool):
     """Watch markdown file, rebuild on changes, and serve HTML (Flask)."""
+
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
 
     if output is None:
         output = Path("site")
 
     assert output is not None  # Help type checker understand output is not None
-    output_file = output / f"{file.stem}.html"
+    output_file = output / f"{resolved_file.stem}.html"
 
     broadcaster = Broadcaster()
 
     def rebuild(cancel_event=None):
         logger = get_logger("cli")
         logger.debug("!!!!!!!!!!!!!! Rebuilding...")
-        click.echo(f"Rebuilding {file}...")
+        click.echo(f"Rebuilding {resolved_file}...")
         try:
-            with open(file) as f:
+            with open(resolved_file) as f:
                 content = f.read()
             config, cells = parse_markdown(content)
             validate_cells(cells)
@@ -849,7 +905,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
             from .executor import ExecutionResult, check_all_cells_staleness
             import json
 
-            work_dir = Path.cwd()
+            work_dir = resolved_file.parent
             staleness = check_all_cells_staleness(cells, work_dir)
             initial_results = []
             cached_initial_by_id = {}
@@ -991,7 +1047,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
             logger.info("Generating immediate loading state")
 
             # Read and parse the current file
-            with open(file) as f:
+            with open(resolved_file) as f:
                 content = f.read()
             config, cells = parse_markdown(content)
             validate_cells(cells)
@@ -1015,7 +1071,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                 logger.info(f"  {cell.id}=loading (file_changed)")
 
             # Generate and emit loading HTML
-            work_dir = Path.cwd()
+            work_dir = resolved_file.parent
             generate_html(
                 content, config, cells, loading_results, output_file, work_dir
             )
@@ -1038,11 +1094,11 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
 
     # Watch source file with queue manager
     def on_file_change():
-        rebuild_queue.request_rebuild(file)
+        rebuild_queue.request_rebuild(str(resolved_file))
 
-    event_handler = MarkdownHandler(file, on_file_change)
+    event_handler = MarkdownHandler(resolved_file, on_file_change)
     observer = Observer()
-    observer.schedule(event_handler, str(file.parent), recursive=False)
+    observer.schedule(event_handler, str(resolved_file.parent), recursive=False)
     observer.start()
 
     # Start Flask app
@@ -1095,7 +1151,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
 
 
 @main.command()
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file", type=str)
 @click.option("--cell", help="Cell to export (exports all cells if not specified)")
 @click.option(
     "--output",
@@ -1103,7 +1159,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
     type=click.Path(path_type=Path),
     help="Output directory (default: export/)",
 )
-def export(file: Path, cell: Optional[str], output: Optional[Path]):
+def export(file: str, cell: Optional[str], output: Optional[Path]):
     """Export cell files and their dependencies to a directory."""
 
     if output is None:
@@ -1111,9 +1167,12 @@ def export(file: Path, cell: Optional[str], output: Optional[Path]):
 
     assert output is not None  # Help type checker understand output is not None
 
+    # Resolve file path (download if URL)
+    resolved_file = resolve_file_path(file)
+
     # Read and parse markdown
     try:
-        with open(file) as f:
+        with open(resolved_file) as f:
             content = f.read()
 
         from .parser import parse_markdown, validate_cells
