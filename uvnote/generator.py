@@ -88,6 +88,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             
             --shadow: rgba(255, 255, 255, 0.05);
         }
+        html {
+            overscroll-behavior: none;
+        }
         body {
             font-family: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Monaco, 'Consolas', monospace;
             line-height: 1.4;
@@ -97,6 +100,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: var(--text-primary);
             background: var(--bg-primary);
             transition: background-color 0.2s ease, color 0.2s ease;
+            overscroll-behavior: none;
         }
         
         /* Two panel layout removed */
@@ -108,6 +112,92 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: flex;
             gap: 0.5rem;
             z-index: 1000;
+        }
+        
+        .menu-button {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            padding: 8px 12px;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            user-select: none;
+        }
+        
+        .menu-button:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        
+        .menu-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 4px;
+            box-shadow: 0 4px 12px var(--shadow);
+            min-width: 160px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px);
+            transition: all 0.2s ease;
+            z-index: 1001;
+            margin-top: 4px;
+        }
+        
+        .menu-button.active .menu-dropdown {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        
+        .menu-item {
+            display: block;
+            padding: 8px 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--border-primary);
+            cursor: pointer;
+        }
+        
+        .menu-item:last-child {
+            border-bottom: none;
+        }
+        
+        .menu-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        
+        .menu-checkbox {
+            display: inline-block;
+            width: 16px;
+            font-family: monospace;
+            color: var(--text-link);
+        }
+        
+        .theme-toggle,
+        .reset-toggle {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            padding: 8px 12px;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            user-select: none;
+        }
+        
+        .theme-toggle:hover,
+        .reset-toggle:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
         }
         
         .system-info {
@@ -640,9 +730,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{ config.custom_css }}
         
         /* Cursor for tools */
-        body[data-tool="arrow"] .main-content { cursor: crosshair; }
-        body[data-tool="pen"] .main-content { cursor: pointer; }
-        body[data-tool="eraser"] .main-content { cursor: cell; }
+        body[data-tool="arrow"] .main-content { 
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23e53935" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>') 12 12, crosshair;
+        }
+        body[data-tool="pen"] .main-content { 
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23e53935" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><circle cx="4" cy="20" r="2" fill="%23e53935"/></svg>') 4 20, pointer;
+        }
+        body[data-tool="eraser"] .main-content { 
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23e53935" stroke-width="2"><path d="M20 20H7l-7-7 7-7h13v14z"/><path d="M13 13l7-7"/><path d="M13 13L9 9"/></svg>') 12 12, auto;
+        }
 
         /* Color picker styles */
         .tools-section-title {
@@ -996,6 +1092,86 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             location.reload();
         }
 
+        function toggleMenu() {
+            const menuButton = document.querySelector('.menu-button');
+            if (menuButton) {
+                menuButton.classList.toggle('active');
+            }
+        }
+
+        function toggleWidget(widgetName) {
+            let widget;
+            let checkbox;
+            
+            // Close the menu first
+            const menuButton = document.querySelector('.menu-button');
+            if (menuButton) {
+                menuButton.classList.remove('active');
+            }
+            
+            switch(widgetName) {
+                case 'tools':
+                    widget = document.querySelector('.tools-widget');
+                    checkbox = document.getElementById('checkbox-tools');
+                    break;
+                case 'file-explorer':
+                    widget = document.querySelector('.file-explorer');
+                    checkbox = document.getElementById('checkbox-file-explorer');
+                    break;
+                case 'minimap':
+                    widget = document.querySelector('.minimap');
+                    checkbox = document.getElementById('checkbox-minimap');
+                    break;
+                default:
+                    return;
+            }
+            
+            if (widget && checkbox) {
+                const isVisible = getComputedStyle(widget).display !== 'none';
+                widget.style.display = isVisible ? 'none' : 'block';
+                checkbox.textContent = isVisible ? '☐' : '☑';
+                
+                // Save state to localStorage
+                try {
+                    localStorage.setItem(`uvnote-widget-${widgetName}`, isVisible ? 'hidden' : 'visible');
+                } catch (_) {}
+                
+                // Re-layout widgets after visibility change
+                try { 
+                    layoutWidgetsStackedBottomRight(); 
+                } catch (_) {}
+            }
+        }
+        
+        function initializeWidgetVisibility() {
+            const widgets = [
+                { name: 'tools', selector: '.tools-widget' },
+                { name: 'file-explorer', selector: '.file-explorer' },
+                { name: 'minimap', selector: '.minimap' }
+            ];
+            
+            widgets.forEach(({ name, selector }) => {
+                const savedState = localStorage.getItem(`uvnote-widget-${name}`) || 'hidden';
+                const widget = document.querySelector(selector);
+                const checkbox = document.getElementById(`checkbox-${name}`);
+                
+                if (widget && checkbox) {
+                    const isVisible = savedState === 'visible';
+                    widget.style.display = isVisible ? 'block' : 'none';
+                    checkbox.textContent = isVisible ? '☑' : '☐';
+                }
+            });
+        }
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menuButton = document.querySelector('.menu-button');
+            // Don't close if clicking on a menu item (let the item handler close it)
+            if (menuButton && !menuButton.contains(event.target)) {
+                menuButton.classList.remove('active');
+            }
+        });
+
         // Layout: stack widgets bottom-right and equalize widths
         function hasCustomWidgetPositions() {
             try {
@@ -1298,16 +1474,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         // Tools widget
+        let _cursorX = 0;
+        let _cursorY = 0;
+        let _cursorVisible = false;
+        
         function setActiveTool(tool) {
             if (!tool || tool === 'none') {
                 document.body.dataset.tool = 'none';
                 localStorage.setItem('uvnote-active-tool', 'none');
                 setOverlayActive(false);
+                _cursorVisible = false;
                 return;
             }
             document.body.dataset.tool = tool;
             localStorage.setItem('uvnote-active-tool', tool);
             setOverlayActive(true);
+            _cursorVisible = true;
         }
 
         function getArrowColor() {
@@ -1328,6 +1510,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function setStoredLineThickness(thickness) {
             try { localStorage.setItem('uvnote-line-thickness', thickness); } catch (_) {}
+        }
+
+        function getFadeoutTime() {
+            const saved = localStorage.getItem('uvnote-fadeout-time');
+            if (saved) return parseInt(saved, 10);
+            return 5; // default 5 seconds
+        }
+
+        function setStoredFadeoutTime(seconds) {
+            try { localStorage.setItem('uvnote-fadeout-time', seconds); } catch (_) {}
         }
 
         function createToolsWidget() {
@@ -1445,6 +1637,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 s.onclick = () => {
                     setStoredArrowColor(c);
                     refreshColorUI(c);
+                    if (_cursorVisible) renderOverlay();
                 };
                 colorRow.appendChild(s);
                 swatches.push(s);
@@ -1456,6 +1649,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             colorInput.oninput = () => {
                 setStoredArrowColor(colorInput.value);
                 refreshColorUI(colorInput.value);
+                if (_cursorVisible) renderOverlay();
             };
             colorRow.appendChild(colorInput);
 
@@ -1513,10 +1707,41 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const value = parseInt(thicknessSlider.value, 10);
                 setStoredLineThickness(value);
                 thicknessValue.textContent = value + 'px';
+                if (_cursorVisible) renderOverlay();
             };
 
             thicknessRow.appendChild(thicknessSlider);
             thicknessRow.appendChild(thicknessValue);
+
+            // Fadeout time slider
+            const fadeoutTitle = document.createElement('div');
+            fadeoutTitle.className = 'tools-section-title';
+            fadeoutTitle.textContent = 'fadeout time';
+            tools.appendChild(fadeoutTitle);
+
+            const fadeoutRow = document.createElement('div');
+            fadeoutRow.className = 'thickness-row';
+            tools.appendChild(fadeoutRow);
+
+            const fadeoutSlider = document.createElement('input');
+            fadeoutSlider.type = 'range';
+            fadeoutSlider.className = 'thickness-slider';
+            fadeoutSlider.min = '0';
+            fadeoutSlider.max = '30';
+            fadeoutSlider.value = getFadeoutTime();
+            
+            const fadeoutValue = document.createElement('span');
+            fadeoutValue.className = 'thickness-value';
+            fadeoutValue.textContent = fadeoutSlider.value === '0' ? 'never' : fadeoutSlider.value + 's';
+
+            fadeoutSlider.oninput = function() {
+                const value = parseInt(fadeoutSlider.value, 10);
+                setStoredFadeoutTime(value);
+                fadeoutValue.textContent = value === 0 ? 'never' : value + 's';
+            };
+
+            fadeoutRow.appendChild(fadeoutSlider);
+            fadeoutRow.appendChild(fadeoutValue);
 
             // Draggable behavior
             makeDraggable(tools, 'uvnote-tools-pos', title);
@@ -1562,8 +1787,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function updateShapesFade() {
             const now = Date.now();
-            const fadeStartTime = 3000; // Start fading after 3 seconds
-            const fadeEndTime = 5000; // Fully gone after 5 seconds
+            const fadeoutSeconds = getFadeoutTime();
+            
+            // If fadeout is disabled (0 seconds), don't fade anything
+            if (fadeoutSeconds === 0) return;
+            
+            const fadeStartTime = Math.max(0, (fadeoutSeconds - 2) * 1000); // Start fading 2s before end
+            const fadeEndTime = fadeoutSeconds * 1000; // Fully gone after specified time
             let needsUpdate = false;
 
             for (let i = _shapes.length - 1; i >= 0; i--) {
@@ -1643,12 +1873,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function onPointerMove(e) {
-            if (!_drawing) return;
+            // Update cursor position
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _cursorX = pt.x;
+            _cursorY = pt.y;
+            
+            if (!_drawing) {
+                // Just update cursor position and re-render
+                if (_cursorVisible) {
+                    renderOverlay();
+                }
+                return;
+            }
+            
             if (_drawing.type === 'pen') {
                 moveDrawPen(e);
             } else {
                 moveDrawArrow(e);
             }
+        }
+        
+        function onPointerEnter(e) {
+            _cursorVisible = document.body.dataset.tool !== 'none';
+            if (_cursorVisible) {
+                renderOverlay();
+            }
+        }
+        
+        function onPointerLeave(e) {
+            _cursorVisible = false;
+            renderOverlay();
         }
 
         function onPointerUp(e) {
@@ -1790,34 +2044,60 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             
-            // Calculate arrow geometry
-            const angle = Math.atan2(y2 - y1, x2 - x1);
-            const headLength = Math.min(15 + width * 1.5, 25); // Cap the max head size
-            const headAngle = Math.PI / 6; // 30 degrees
+            // Check if points are too close (initial state)
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const distance = Math.sqrt(dx * dx + dy * dy);
             
-            // Calculate where the line should end (before the arrowhead)
-            const lineEndX = x2 - headLength * 0.8 * Math.cos(angle);
-            const lineEndY = y2 - headLength * 0.8 * Math.sin(angle);
-            
-            // Draw the line
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(lineEndX, lineEndY);
-            ctx.stroke();
-            
-            // Calculate arrowhead points
-            const hx1 = x2 - headLength * Math.cos(angle - headAngle);
-            const hy1 = y2 - headLength * Math.sin(angle - headAngle);
-            const hx2 = x2 - headLength * Math.cos(angle + headAngle);
-            const hy2 = y2 - headLength * Math.sin(angle + headAngle);
-            
-            // Draw arrowhead
-            ctx.beginPath();
-            ctx.moveTo(x2, y2);
-            ctx.lineTo(hx1, hy1);
-            ctx.lineTo(hx2, hy2);
-            ctx.closePath();
-            ctx.fill();
+            if (distance < 5) {
+                // Draw just a small arrowhead pointing down-right when first clicked
+                const defaultAngle = Math.PI / 4; // 45 degrees (down-right)
+                const headLength = Math.min(15 + width * 1.5, 25);
+                const headAngle = Math.PI / 6;
+                
+                // Calculate arrowhead points
+                const hx1 = x1 + headLength * Math.cos(defaultAngle - headAngle);
+                const hy1 = y1 + headLength * Math.sin(defaultAngle - headAngle);
+                const hx2 = x1 + headLength * Math.cos(defaultAngle + headAngle);
+                const hy2 = y1 + headLength * Math.sin(defaultAngle + headAngle);
+                
+                // Draw arrowhead only
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(hx1, hy1);
+                ctx.lineTo(hx2, hy2);
+                ctx.closePath();
+                ctx.fill();
+            } else {
+                // Normal arrow drawing - head at x1,y1, tail at x2,y2
+                const angle = Math.atan2(y1 - y2, x1 - x2);
+                const headLength = Math.min(15 + width * 1.5, 25);
+                const headAngle = Math.PI / 6;
+                
+                // Calculate where the line should end (before the arrowhead)
+                const lineEndX = x1 - headLength * 0.8 * Math.cos(angle);
+                const lineEndY = y1 - headLength * 0.8 * Math.sin(angle);
+                
+                // Draw the line from tail to near the head
+                ctx.beginPath();
+                ctx.moveTo(x2, y2);
+                ctx.lineTo(lineEndX, lineEndY);
+                ctx.stroke();
+                
+                // Calculate arrowhead points
+                const hx1 = x1 - headLength * Math.cos(angle - headAngle);
+                const hy1 = y1 - headLength * Math.sin(angle - headAngle);
+                const hx2 = x1 - headLength * Math.cos(angle + headAngle);
+                const hy2 = y1 - headLength * Math.sin(angle + headAngle);
+                
+                // Draw arrowhead
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(hx1, hy1);
+                ctx.lineTo(hx2, hy2);
+                ctx.closePath();
+                ctx.fill();
+            }
             
             // Restore opacity
             ctx.globalAlpha = oldAlpha;
@@ -1867,11 +2147,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     drawArrow(_overlayCtx, _drawing.x1 - offX, _drawing.y1 - offY, _drawing.x2 - offX, _drawing.y2 - offY, _drawing.color, _drawing.width);
                 }
             }
+            
+            // Draw cursor dot when tool is active
+            if (_cursorVisible && !_drawing) {
+                const tool = document.body.dataset.tool;
+                const color = getArrowColor();
+                const thickness = getLineThickness();
+                
+                _overlayCtx.save();
+                _overlayCtx.fillStyle = color;
+                _overlayCtx.globalAlpha = 0.7;
+                
+                if (tool === 'eraser') {
+                    // Draw eraser indicator
+                    _overlayCtx.strokeStyle = color;
+                    _overlayCtx.lineWidth = 2;
+                    _overlayCtx.beginPath();
+                    _overlayCtx.arc(_cursorX, _cursorY, 10, 0, 2 * Math.PI);
+                    _overlayCtx.stroke();
+                } else {
+                    // Draw dot for pen/arrow
+                    _overlayCtx.beginPath();
+                    _overlayCtx.arc(_cursorX, _cursorY, thickness / 2, 0, 2 * Math.PI);
+                    _overlayCtx.fill();
+                }
+                
+                _overlayCtx.restore();
+            }
         }
 
         function setOverlayActive(active) {
             if (!_overlay) initOverlay();
             _overlay.style.pointerEvents = active ? 'auto' : 'none';
+            _overlay.style.cursor = active ? 'none' : 'auto';
             // Re-render to ensure visibility aligns with content
             renderOverlay();
         }
@@ -1890,6 +2198,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Events
             _overlay.addEventListener('mousedown', onPointerDown);
             _overlay.addEventListener('mousemove', onPointerMove);
+            _overlay.addEventListener('mouseenter', onPointerEnter);
+            _overlay.addEventListener('mouseleave', onPointerLeave);
             document.addEventListener('mouseup', onPointerUp);
             _overlay.addEventListener('touchstart', onPointerDown, { passive: false });
             _overlay.addEventListener('touchmove', onPointerMove, { passive: false });
@@ -1921,6 +2231,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!_overlay) return;
             _overlay.removeEventListener('mousedown', onPointerDown);
             _overlay.removeEventListener('mousemove', onPointerMove);
+            _overlay.removeEventListener('mouseenter', onPointerEnter);
+            _overlay.removeEventListener('mouseleave', onPointerLeave);
             document.removeEventListener('mouseup', onPointerUp);
             _overlay.removeEventListener('touchstart', onPointerDown);
             _overlay.removeEventListener('touchmove', onPointerMove);
@@ -2083,6 +2395,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             initFileExplorer();
             initTools();
             initOverlay();
+            initializeWidgetVisibility();
             layoutWidgetsStackedBottomRight();
             window.addEventListener('resize', layoutWidgetsStackedBottomRight);
         });
@@ -2092,6 +2405,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="controls">
         <div class="theme-toggle" onclick="toggleTheme()">light</div>
         <div class="reset-toggle" onclick="resetLayout()">reset</div>
+        <div class="menu-button" onclick="toggleMenu()">
+            menu ▼
+            <div class="menu-dropdown">
+                <div class="menu-item" onclick="toggleWidget('tools')">
+                    <span class="menu-checkbox" id="checkbox-tools">☐</span> Tools
+                </div>
+                <div class="menu-item" onclick="toggleWidget('file-explorer')">
+                    <span class="menu-checkbox" id="checkbox-file-explorer">☐</span> File Explorer
+                </div>
+                <div class="menu-item" onclick="toggleWidget('minimap')">
+                    <span class="menu-checkbox" id="checkbox-minimap">☐</span> Table of Contents
+                </div>
+            </div>
+        </div>
     </div>
     
     <div class="system-info">
