@@ -43,8 +43,8 @@ class MarkdownHandler(FileSystemEventHandler):
 @click.option(
     "--log-file",
     envvar="UVNOTE_LOG_FILE",
-    default="uvnote.log",
-    help="Path to log file",
+    default=None,
+    help="Path to log file (default: console only)",
 )
 @click.option(
     "--log-level",
@@ -53,12 +53,16 @@ class MarkdownHandler(FileSystemEventHandler):
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
     help="Logging level",
 )
-@click.option("--console-log", is_flag=True, help="Also output logs to console")
+@click.option(
+    "--no-console-log", is_flag=True, help="Disable console logging (file only)"
+)
 @click.pass_context
-def main(ctx, log_file, log_level, console_log):
+def main(ctx, log_file, log_level, no_console_log):
     """uvnote: Stateless, deterministic notebooks with uv and Markdown."""
     # Set up logging
-    setup_logging(log_file=log_file, log_level=log_level, console_output=console_log)
+    setup_logging(
+        log_file=log_file, log_level=log_level, console_output=not no_console_log
+    )
     ctx.ensure_object(dict)
     ctx.obj["logger"] = get_logger("cli")
 

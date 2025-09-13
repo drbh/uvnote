@@ -23,7 +23,6 @@ def get_system_info() -> Dict[str, str]:
         "system": platform.system(),
         "machine": platform.machine(),
         "processor": platform.processor() or "Unknown",
-        "python_version": platform.python_version(),
         "platform": platform.platform(),
     }
 
@@ -2089,7 +2088,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="system-info">
         <div class="system-info-header">Generated on:</div>
         <div class="system-info-content">
-            {{ system_info.system }} {{ system_info.machine }} | Python {{ system_info.python_version }} | {{ system_info.platform }}
+            {{ system_info.system }} {{ system_info.machine }} | {{ system_info.platform }}
         </div>
     </div>
     
@@ -2098,155 +2097,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     
     
-</body>
-</html>"""
-
-# Slim template: minimal CSS + tiny JS; no widgets/minimap/tools
-HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
-<html lang=\"en\">
-<head>
-  <meta charset=\"UTF-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-  <title>{{ title }}</title>
-  <script>
-    (function(){
-      const pref='{{ config.theme }}';
-      let theme = pref==='auto' ? (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : (localStorage.getItem('uvnote-theme')||pref);
-      document.documentElement.setAttribute('data-theme', theme);
-    })();
-
-    // Minimal UI helpers used by rendered cells
-    function toggleCell(id){toggleCode(id);toggleOutput(id);}
-    function toggleCode(id){
-      const el=document.getElementById('code-'+id);
-      if(el){el.classList.toggle('collapsed');updateIndicators(id);} }
-    function toggleOutput(id){
-      const el=document.getElementById('output-'+id);
-      if(el){el.classList.toggle('collapsed');updateIndicators(id);} }
-    function updateIndicators(id){
-      const header=document.querySelector('.cell-header [onclick*="'+id+'"]')?.closest('.cell-header');
-      if(!header) return;
-      const codeCollapsed=document.getElementById('code-'+id)?.classList.contains('collapsed');
-      const outCollapsed=document.getElementById('output-'+id)?.classList.contains('collapsed');
-      const indicators=header.querySelector('.collapse-indicators');
-      if(!indicators) return;
-      const spans=indicators.querySelectorAll('span');
-      if(spans[0]) spans[0].textContent=(codeCollapsed?'\u25b6':'\u25bc')+' code';
-      if(spans[1]) spans[1].textContent=(outCollapsed?'\u25b6':'\u25bc')+' output';
-    }
-    function runCell(cellId){
-      const btn=document.querySelector('.run-btn[onclick*="'+cellId+'"]');
-      const output=document.getElementById('output-'+cellId);
-      if(btn){btn.textContent='⏳ running...';btn.disabled=true;}
-      if(output){output.classList.add('output-stale');}
-      fetch('/run/'+cellId,{method:'POST'}).then(r=>r.json()).then(data=>{
-        if(output){
-          output.classList.remove('output-stale');
-          let html='';
-          if(data.stdout) html+='<div class="cell-stdout">'+data.stdout+'</div>';
-          if(data.stderr) html+='<div class="cell-stderr">'+data.stderr+'</div>';
-          output.innerHTML=html;
-        }
-        if(btn){btn.textContent='▶ run';btn.disabled=false;}
-      }).catch(e=>{
-        console.error('Run failed:',e);
-        if(output){output.classList.remove('output-stale');}
-        if(btn){btn.textContent='▶ run';btn.disabled=false;}
-      });
-    }
-    function copyCell(cellId){
-      console.log('copyCell called with cellId:', cellId);
-      let codeElement=document.querySelector('#code-'+cellId+' code');
-      if(!codeElement) codeElement=document.querySelector('#code-'+cellId+' pre code');
-      if(!codeElement) codeElement=document.querySelector('#code-'+cellId+' .highlight code');
-      if(!codeElement){
-        const codeDiv=document.getElementById('code-'+cellId);
-        if(codeDiv) codeElement=codeDiv.querySelector('code');
-      }
-      const btn=document.querySelector('.copy-btn[onclick*="'+cellId+'"]');
-      console.log('Found codeElement:', codeElement, 'Found btn:', btn);
-      if(!codeElement||!btn) return;
-      const codeText=codeElement.textContent;
-      if(navigator.clipboard&&navigator.clipboard.writeText){
-        navigator.clipboard.writeText(codeText).then(function(){
-          btn.textContent='✓ Copied!';btn.classList.add('copied');
-          setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
-        }).catch(function(){fallbackCopy();});
-      }else{fallbackCopy();}
-      function fallbackCopy(){
-        const textarea=document.createElement('textarea');
-        textarea.value=codeText;textarea.style.position='absolute';textarea.style.left='-9999px';
-        document.body.appendChild(textarea);textarea.select();
-        try{
-          document.execCommand('copy');
-          btn.textContent='✓ Copied!';btn.classList.add('copied');
-          setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
-        }catch(err){
-          btn.textContent='Copy failed';
-          setTimeout(function(){btn.textContent='Copy';},2000);
-        }
-        document.body.removeChild(textarea);
-      }
-    }
-    // Live reload functionality (robust SSE handling)
-    (function(){
-      if(!('EventSource' in window)){console.warn('SSE not supported');return;}
-      let source=new EventSource('/events');
-      let isOpen=false;
-      source.onopen=function(){isOpen=true;console.log('SSE connected');};
-      source.onmessage=function(e){
-        const msg=(e.data||'').trim(); if(!msg) return;
-        console.log('SSE message:', msg);
-        if(msg==='reload'||msg==='incremental'){location.reload();}
-      };
-      source.onerror=function(e){ if(isOpen) console.warn('SSE error, auto-retry', e); };
-      window.addEventListener('beforeunload', function(){ try{source.close();}catch(_){} });
-    })();
-  </script>
-  <style>
-    :root[data-theme=\"light\"]{--bg:#fff;--bg2:#f6f8fa;--code:#f8f9fa;--txt:#333;--muted:#656d76;--link:#0969da;--errbg:#fdf2f2;--err:#c53030;--border:#e1e5e9}
-    :root[data-theme=\"dark\"]{--bg:#0a0a0a;--bg2:#121212;--code:#0d0d0d;--txt:#e0e0e0;--muted:#888;--link:#64b5f6;--errbg:#1a0f0f;--err:#ff6b6b;--border:#2a2a2a}
-    body{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;line-height:1.4;max-width:960px;margin:0 auto;padding:16px;background:var(--bg);color:var(--txt)}
-    .controls{position:fixed;top:16px;right:16px;display:flex;gap:8px}
-    .btn{background:var(--bg2);border:1px solid var(--border);padding:6px 8px;border-radius:2px;color:var(--muted);cursor:pointer}
-    .system-info{background:var(--bg2);border:1px solid var(--border);border-radius:2px;padding:6px 8px;margin-bottom:12px;font-size:0.85em;color:var(--muted)}
-    .system-info-header{font-weight:600;color:var(--txt);margin-right:4px}
-    .btn:hover{color:var(--txt)}
-    .cell{margin:1rem 0;border:1px solid var(--border);border-radius:2px;background:var(--bg2)}
-    .cell-header{padding:.5rem 1rem;border-bottom:1px solid var(--border);color:var(--muted)}
-    .collapse-indicators{color:var(--muted);font-size:.85em;opacity:.9}
-    .cell-code{background:var(--code)}
-    .cell-code pre{margin:0;padding:.75rem;overflow-x:auto}
-    .cell-code.collapsed{display:none}
-    .cell-output{padding:.75rem;background:var(--bg)}
-    .cell-output.collapsed{display:none}
-    .cell-stdout{white-space:pre-wrap;background:var(--bg2);padding:.5rem;border-radius:2px}
-    .cell-stderr{white-space:pre-wrap;background:var(--errbg);border-left:2px solid var(--err);padding:.6rem;color:var(--err)}
-    .artifact{display:inline-block;border:1px solid var(--border);padding:.2rem .4rem;margin:.2rem .4rem .2rem 0;color:var(--link);text-decoration:none}
-    .artifact-preview img{max-width:100%;height:auto;border:1px solid var(--border)}
-    .artifact-preview svg{max-width:100%;height:auto;border:1px solid var(--border);display:block;background:transparent}
-    .artifact-preview svg text{fill:var(--txt)}
-    .artifact-preview svg *[fill="black"]{fill:var(--txt)}
-    .artifact-preview svg *[fill="white"]{fill:var(--bg)}
-    .artifact-preview svg *[stroke="black"]{stroke:var(--txt)}
-    .artifact-preview svg *[stroke="white"]{stroke:var(--bg)}
-    .cell-failed{border-color:var(--err)}
-    {{ pygments_css }}
-    {{ config.custom_css }}
-    .loading-skeleton{display:inline-block;height:12px;width:180px;background:linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12), rgba(0,0,0,0.06));background-size:200% 100%;animation:sk 1.2s linear infinite;margin-left:8px;border-radius:2px}
-    @keyframes sk{0%{background-position:0% 0}100%{background-position:200% 0}}
-    .run-btn{background:var(--bg2);border:1px solid var(--border);padding:2px 6px;border-radius:2px;color:var(--muted);cursor:pointer;font-size:0.85em}
-    .run-btn:hover{color:var(--txt);background:var(--bg)}
-    .copy-btn{background:var(--bg2);border:1px solid var(--border);padding:2px 6px;border-radius:2px;color:var(--muted);cursor:pointer;font-size:0.75em;margin-left:4px}
-    .copy-btn:hover{color:var(--txt);background:var(--bg)}
-    .output-stale{opacity:0.5;position:relative}
-    .output-stale::after{content:'⏳ updating...';position:absolute;top:8px;right:8px;background:var(--bg2);padding:2px 6px;border-radius:2px;font-size:0.8em;color:var(--muted);border:1px solid var(--border)}
-  </style>
-</head>
-<body>
-  <div class=\"controls\"><button class=\"btn theme-toggle\" onclick=\"(function(){const h=document.documentElement;const t=h.getAttribute('data-theme');const n=t==='dark'?'light':'dark';h.setAttribute('data-theme',n);try{localStorage.setItem('uvnote-theme',n)}catch(_){}})()\">theme</button></div>
-  <div class=\"system-info\"><span class=\"system-info-header\">Generated on:</span> {{ system_info.system }} {{ system_info.machine }} | Python {{ system_info.python_version }} | {{ system_info.platform }}</div>
-  <main class=\"main-content\">{{ content|safe }}</main>
 </body>
 </html>"""
 
@@ -2443,9 +2293,7 @@ def generate_html(
 
     # Setup Jinja2 environment
     env = Environment(loader=BaseLoader())
-    # Choose full (feature-rich) template by default; opt into slim with env
-    use_slim = os.environ.get("UVNOTE_SLIM_HTML", "0") == "1"
-    template = env.from_string(HTML_TEMPLATE_SLIM if use_slim else HTML_TEMPLATE)
+    template = env.from_string(HTML_TEMPLATE)
 
     # Get Pygments CSS for both themes
     # Dark theme CSS (use configured syntax theme)

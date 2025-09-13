@@ -8,7 +8,7 @@ import os
 def setup_logging(
     log_file: Optional[str] = None,
     log_level: str = "INFO",
-    console_output: bool = False,
+    console_output: bool = True,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
 ) -> logging.Logger:
@@ -16,9 +16,9 @@ def setup_logging(
     Set up logging configuration for uvnote.
 
     Args:
-        log_file: Path to log file. If None, uses 'uvnote.log' in current directory
+        log_file: Path to log file. If None, no file logging. If "", uses default file
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        console_output: Whether to also output to console
+        console_output: Whether to output to console (default True)
         max_bytes: Maximum size of log file before rotation
         backup_count: Number of backup files to keep
 
@@ -42,26 +42,27 @@ def setup_logging(
         "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
     )
 
-    # File handler with rotation
-    if log_file is None:
-        log_file = os.environ.get("UVNOTE_LOG_FILE", "uvnote.log")
-
-    log_path = Path(log_file)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_path, maxBytes=max_bytes, backupCount=backup_count
-    )
-    file_handler.setLevel(logging.DEBUG)  # Capture everything in file
-    file_handler.setFormatter(detailed_formatter)
-    logger.addHandler(file_handler)
-
-    # Console handler (optional)
+    # Console handler (default)
     if console_output:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(simple_formatter)
         logger.addHandler(console_handler)
+
+    # File handler with rotation (optional)
+    if log_file is not None:
+        if log_file == "":
+            log_file = os.environ.get("UVNOTE_LOG_FILE", "uvnote.log")
+
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=max_bytes, backupCount=backup_count
+        )
+        file_handler.setLevel(logging.DEBUG)  # Capture everything in file
+        file_handler.setFormatter(detailed_formatter)
+        logger.addHandler(file_handler)
 
     return logger
 

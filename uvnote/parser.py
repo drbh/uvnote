@@ -71,7 +71,8 @@ def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
 
     # Check if content starts with frontmatter
     if not lines or lines[0].strip() != "---":
-        return DocumentConfig(), content
+        # No frontmatter - use defaults but don't collapse code
+        return DocumentConfig(collapse_code=False), content
 
     # Find the closing ---
     frontmatter_end = -1
@@ -81,7 +82,8 @@ def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
             break
 
     if frontmatter_end == -1:
-        return DocumentConfig(), content
+        # Incomplete frontmatter - treat as no frontmatter
+        return DocumentConfig(collapse_code=False), content
 
     # Parse YAML frontmatter
     try:
@@ -100,7 +102,7 @@ def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
         theme=frontmatter_data.get("theme", "dark"),
         syntax_theme=frontmatter_data.get("syntax_theme", "monokai"),
         show_line_numbers=frontmatter_data.get("show_line_numbers", False),
-        collapse_code=frontmatter_data.get("collapse_code", True),
+        collapse_code=frontmatter_data.get("collapse_code", False),
         custom_css=frontmatter_data.get("custom_css", ""),
     )
 
