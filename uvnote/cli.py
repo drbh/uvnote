@@ -373,6 +373,24 @@ def build(
     else:
         click.echo(f"Final: {output_file}")
 
+    # Copy cell files to output directory for URL access
+    try:
+        cells_src = work_dir / ".uvnote" / "cells"
+        cells_dst = output / "cells"
+
+        if cells_src.exists():
+            # Remove existing cells directory if it exists
+            if cells_dst.exists():
+                shutil.rmtree(cells_dst)
+
+            # Copy the entire cells directory
+            shutil.copytree(cells_src, cells_dst)
+            click.echo(f"Copied cell files to: {cells_dst}")
+        else:
+            click.echo("No cell files found to copy")
+    except Exception as e:
+        click.echo(f"Warning: Failed to copy cell files: {e}", err=True)
+
     return 0
 
 
@@ -726,6 +744,24 @@ def build_loading(file: str, output: Optional[Path]):
         click.echo(f"Error generating HTML: {e}", err=True)
         return 1
 
+    # Copy cell files to output directory for URL access
+    try:
+        cells_src = work_dir / ".uvnote" / "cells"
+        cells_dst = output / "cells"
+
+        if cells_src.exists():
+            # Remove existing cells directory if it exists
+            if cells_dst.exists():
+                shutil.rmtree(cells_dst)
+
+            # Copy the entire cells directory
+            shutil.copytree(cells_src, cells_dst)
+            click.echo(f"Copied cell files to: {cells_dst}")
+        else:
+            click.echo("No cell files found to copy")
+    except Exception as e:
+        click.echo(f"Warning: Failed to copy cell files: {e}", err=True)
+
     return 0
 
 
@@ -1035,6 +1071,23 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
 
             # Final HTML and broadcast
             generate_html(content, config, cells, results, output_file, work_dir)
+
+            # Copy cell files to output directory for URL access
+            try:
+                cells_src = work_dir / ".uvnote" / "cells"
+                cells_dst = output / "cells"
+
+                if cells_src.exists():
+                    # Remove existing cells directory if it exists
+                    if cells_dst.exists():
+                        shutil.rmtree(cells_dst)
+
+                    # Copy the entire cells directory
+                    shutil.copytree(cells_src, cells_dst)
+                    logger.info(f"  cells: {cells_dst}")
+            except Exception as e:
+                logger.error(f"  cells_copy_error: {e}")
+
             click.echo(f"Rebuilt: {output_file}")
             broadcaster.broadcast("reload")
         except Exception as e:
@@ -1089,8 +1142,41 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
         min_interval_seconds=1.0,
     )
 
-    # Initial build
-    rebuild()
+    # Generate initial HTML with all loading states for immediate response
+    logger = get_logger("cli")
+    logger.info("Generating initial loading page...")
+    try:
+        with open(resolved_file) as f:
+            content = f.read()
+        config, cells = parse_markdown(content)
+        validate_cells(cells)
+
+        # Create loading placeholders for all cells
+        from .executor import ExecutionResult
+
+        loading_results = []
+        for cell in cells:
+            loading_result = ExecutionResult(
+                cell_id=cell.id,
+                success=True,
+                stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                stderr="",
+                duration=0.0,
+                artifacts=[],
+                cache_key="loading",
+                is_html=True,
+            )
+            loading_results.append(loading_result)
+
+        # Generate initial HTML with loading states
+        work_dir = resolved_file.parent
+        generate_html(content, config, cells, loading_results, output_file, work_dir)
+        logger.info(f"Initial loading page created: {output_file}")
+    except Exception as e:
+        logger.error(f"Failed to create initial page: {e}")
+        # Fall back to empty page if needed
+        output.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("<html><body>Loading...</body></html>")
 
     # Watch source file with queue manager
     def on_file_change():
@@ -1107,6 +1193,14 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
     from flask import jsonify  # type: ignore[import-not-found]
 
     app = create_app(output, output_file.name, broadcaster)
+
+    # Schedule initial build to run after server starts
+    def initial_build():
+        time.sleep(0.5)  # Small delay to ensure server is up
+        logger.info("Starting initial build...")
+        rebuild()
+
+    threading.Thread(target=initial_build, daemon=True).start()
     click.echo(f"Static root: {output.resolve()}")
 
     @app.post("/run/<cell_id>")

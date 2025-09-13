@@ -432,33 +432,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             opacity: 0.8;
         }
         
-        /* Slide functionality */
-        .minimap, .file-explorer, .tools-widget {
-            transition: transform 0.3s ease;
-        }
-        .minimap.slide-off, .file-explorer.slide-off, .tools-widget.slide-off {
-            transform: translateX(calc(100% - 20px));
-        }
-        .minimap-title::before, .file-explorer-title::before, .tools-title::before {
-            content: '‹';
-            float: left;
-            cursor: pointer;
-            color: var(--text-secondary);
-            user-select: none;
-            margin-right: 8px;
-        }
-        .minimap-title::after, .file-explorer-title::after, .tools-title::after {
-            content: '›';
-            float: right;
-            cursor: pointer;
-            color: var(--text-secondary);
-            user-select: none;
-        }
-        .minimap.slide-off .minimap-title::after,
-        .file-explorer.slide-off .file-explorer-title::after,
-        .tools-widget.slide-off .tools-title::after {
-            content: '‹';
-        }
 
         /* Hide widgets on smaller screens */
         @media (max-width: 768px) {
@@ -639,6 +612,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .copy-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+        .raw-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            padding: 2px 6px;
+            border-radius: 2px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.75em;
+            font-family: inherit;
+            margin-left: 4px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .raw-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            text-decoration: none;
         }
         .output-stale {
             opacity: 0.5;
@@ -921,23 +912,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (_) {}
         }
 
-        function addSlideToggle(widget, titleEl) {
-            titleEl.onclick = function(e) {
-                const rect = titleEl.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                
-                // Left arrow (always slides back on screen)
-                if (clickX < 30) {
-                    widget.classList.remove('slide-off');
-                    e.stopPropagation();
-                }
-                // Right arrow (always slides off screen)
-                else if (clickX > rect.width - 30) {
-                    widget.classList.add('slide-off');
-                    e.stopPropagation();
-                }
-            };
-        }
 
         function makeDraggable(el, storageKey, handleEl) {
             let dragging = false;
@@ -976,15 +950,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             };
 
             const startDrag = (e) => {
-                // Check if click is on arrow areas - if so, don't start drag
-                if (handleEl) {
-                    const rect = handleEl.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    if (clickX < 30 || clickX > rect.width - 30) {
-                        return; // Don't start drag on arrow areas
-                    }
-                }
-                
                 // Start from element's current on-screen rect
                 const elRect = el.getBoundingClientRect();
                 el.style.left = elRect.left + 'px';
@@ -1249,10 +1214,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Generate minimap content
             const minimap = createMinimap();
             document.body.appendChild(minimap);
-            // Make draggable and slideable (use title as handle)
+            // Make draggable (use title as handle)
             const mTitle = minimap.querySelector('.minimap-title');
             makeDraggable(minimap, 'uvnote-minimap-pos', mTitle);
-            addSlideToggle(minimap, mTitle);
 
             // Attach scroll listener to window (two-panel removed)
             _minimapScrollContainer = window;
@@ -1286,8 +1250,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             // Generate file explorer content
             const fileExplorer = createFileExplorer();
             document.body.appendChild(fileExplorer);
-            const title = fileExplorer.querySelector('.file-explorer-title');
-            addSlideToggle(fileExplorer, title);
         }
         
         function createMinimap() {
@@ -1752,8 +1714,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function initTools() {
             const widget = createToolsWidget();
             document.body.appendChild(widget);
-            const title = widget.querySelector('.tools-title');
-            addSlideToggle(widget, title);
         }
 
         function teardownTools() {
@@ -2492,6 +2452,9 @@ def render_cell(
     )
     html_parts.append(
         f'<button class="copy-btn" onclick="copyCell(\'{cell.id}\')">Copy</button>'
+    )
+    html_parts.append(
+        f'<a href="cells/{cell.id}.py" target="_blank" class="raw-btn">Raw</a>'
     )
     html_parts.append("</div>")
 
