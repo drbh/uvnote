@@ -9,6 +9,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set, Callable
+import threading
 
 from .parser import CodeCell
 from .cache import (
@@ -20,6 +21,9 @@ from .cache import (
     integrity_check,
     get_artifacts,
 )
+from .logging_config import get_logger
+
+logger = get_logger("executor")
 
 
 @dataclass
@@ -41,7 +45,7 @@ def print_dependency_matrix(cells: List[CodeCell]):
     if not cells:
         return
 
-    print("dependency_graph:")
+    logger.info("dependency_graph:")
 
     # Group cells by their dependencies for cleaner output
     has_deps = []
@@ -56,14 +60,14 @@ def print_dependency_matrix(cells: List[CodeCell]):
     # Print cells without dependencies first
     if no_deps:
         root_cells = [cell.id for cell in no_deps]
-        print(f"  roots={','.join(root_cells)}")
+        logger.info(f"  roots={','.join(root_cells)}")
 
     # Print dependency relationships
     for cell in has_deps:
         deps = ",".join(cell.needs)
-        print(f"  {cell.id}={deps}")
+        logger.info(f"  {cell.id}={deps}")
 
-    print()
+    logger.info("")
 
 
 def check_cell_staleness(
@@ -293,7 +297,7 @@ def execute_cell(
 
     deps_str = f" deps={','.join(cell.deps)}" if cell.deps else ""
     needs_str = f" needs={','.join(cell.needs)}" if cell.needs else ""
-    print(f"cell={cell.id}{deps_str}{needs_str}")
+    logger.info(f"cell={cell.id}{deps_str}{needs_str}")
 
     cache_key = generate_cache_key(cell, work_dir, env_vars)
     cache_dir = work_dir / ".uvnote" / "cache" / cache_key
@@ -301,7 +305,7 @@ def execute_cell(
     # Check if this cell should be forced to rerun
     force_rerun_this_cell = force_rerun_cells and cell.id in force_rerun_cells
     if force_rerun_this_cell:
-        print(f"  force=dependencies")
+        logger.info(f"  force=dependencies")
 
     # Check cache
     if use_cache and cache_dir.exists() and not force_rerun_this_cell:
@@ -311,11 +315,11 @@ def execute_cell(
                 cached_result = json.load(f)
             # Integrity check using index/meta
             if not integrity_check(work_dir, cache_key):
-                print(f"  cache=corrupt action=rerun")
+                logger.warning(f"  cache=corrupt action=rerun")
             else:
                 record_access(work_dir, cache_key)
 
-                print(f"  cache=hit duration={cached_result['duration']:.2f}s")
+                logger.info(f"  cache=hit duration={cached_result['duration']:.2f}s")
 
                 # Artifacts from index (fallback to dir scan)
                 artifacts = get_artifacts(work_dir, cache_key)
@@ -331,8 +335,8 @@ def execute_cell(
                                 artifacts.append(str(item.relative_to(cache_dir)))
 
                 if artifacts:
-                    print(f"  artifacts={','.join(artifacts)}")
-                print(f"  status=cached")
+                    logger.info(f"  artifacts={','.join(artifacts)}")
+                logger.info(f"  status=cached")
 
                 return ExecutionResult(
                     cell_id=cell.id,
@@ -346,11 +350,11 @@ def execute_cell(
 
     # Create execution directory
     cache_dir.mkdir(parents=True, exist_ok=True)
-    print(f"  cache=miss")
+    logger.info(f"  cache=miss")
 
     # Create cell script
     script_path = create_cell_script(cell, work_dir)
-    print(f"  script={script_path.relative_to(work_dir)}")
+    logger.info(f"  script={script_path.relative_to(work_dir)}")
 
     # Execute with uv run (stateless temp directory)
     start_time = time.time()
@@ -359,7 +363,7 @@ def execute_cell(
     if env_vars:
         env.update(env_vars)
         env_keys = list(env_vars.keys())
-        print(f"  env_vars={','.join(env_keys)}")
+        logger.info(f"  env_vars={','.join(env_keys)}")
     # Basic sandbox: minimal env
     env["PYTHONNOUSERSITE"] = "1"
     # Use ephemeral HOME inside temp dir for isolation
@@ -368,7 +372,7 @@ def execute_cell(
     try:
         # Convert to absolute path for uv run
         absolute_script_path = script_path.resolve()
-        print(f"  command=uv_run script={absolute_script_path.name}")
+        logger.info(f"  command=uv_run script={absolute_script_path.name}")
 
         with tempfile.TemporaryDirectory(prefix="uvnote-run-") as tmp:
             tmp_path = Path(tmp)
@@ -440,13 +444,13 @@ def execute_cell(
                     pass
 
     except subprocess.TimeoutExpired:
-        print(f"  error=timeout duration=300s")
+        logger.error(f"  error=timeout duration=300s")
         success = False
         stdout = ""
         stderr = "Execution timed out after 300 seconds"
         copied_rel = []
     except Exception as e:
-        print(f"  error={e}")
+        logger.error(f"  error={e}")
         success = False
         stdout = ""
         stderr = f"Execution failed: {e}"
@@ -455,7 +459,7 @@ def execute_cell(
     duration = time.time() - start_time
 
     # Log completion
-    print(f"  duration={duration:.2f}s")
+    logger.info(f"  duration={duration:.2f}s")
 
     # Save outputs
     with open(cache_dir / "stdout.txt", "w") as f:
@@ -467,9 +471,9 @@ def execute_cell(
     # Artifacts are the copied_rel list
     artifacts = copied_rel
     if artifacts:
-        print(f"  artifacts={','.join(sorted(artifacts))}")
+        logger.info(f"  artifacts={','.join(sorted(artifacts))}")
 
-    print(f"  status={'success' if success else 'failed'}")
+    logger.info(f"  status={'success' if success else 'failed'}")
 
     # Save result metadata
     result_data = {
@@ -490,9 +494,9 @@ def execute_cell(
         cap = get_cache_cap_bytes()
         freed, removed = evict_to_target(work_dir, cap)
         if removed:
-            print(f"  eviction=run freed_bytes={freed} removed={len(removed)}")
+            logger.info(f"  eviction=run freed_bytes={freed} removed={len(removed)}")
     except Exception as e:
-        print(f"  cache_index_error={e}")
+        logger.error(f"  cache_index_error={e}")
 
     return ExecutionResult(
         cell_id=cell.id,
@@ -568,17 +572,17 @@ def execute_cells(
     # Print dependency matrix
     print_dependency_matrix(cells)
 
-    print(f"execution_plan:")
-    print(f"  cells={len(order)}")
-    print(f"  order={' -> '.join(order)}")
+    logger.info(f"execution_plan:")
+    logger.info(f"  cells={len(order)}")
+    logger.info(f"  order={' -> '.join(order)}")
     if cyclic:
-        print(f"  warning=cyclic_dependencies cells={','.join(cyclic)}")
-    print()
+        logger.warning(f"  warning=cyclic_dependencies cells={','.join(cyclic)}")
+    logger.info("")
 
     # Execute in computed order
     total_cells = len(order)
     for i, cid in enumerate(order, 1):
-        print(f"progress={i}/{total_cells}")
+        logger.info(f"progress={i}/{total_cells}")
         cell = cells_by_id[cid]
         # Build per-cell env vars including inputs from dependencies
         per_cell_env = dict(env_vars or {})
@@ -601,9 +605,9 @@ def execute_cells(
         executed[cell.id] = result
 
         if result.success:
-            print(f"  result=success")
+            logger.info(f"  result=success")
         else:
-            print(f"  result=failed stopping=true")
+            logger.error(f"  result=failed stopping=true")
             break
 
         # Call incremental callback if provided
@@ -613,7 +617,7 @@ def execute_cells(
     # Mark any cyclic cells as failed with an explanatory message
     for cid in cyclic:
         cell = cells_by_id[cid]
-        print(f"cell={cell.id} status=skipped reason=cyclic_dependency")
+        logger.warning(f"cell={cell.id} status=skipped reason=cyclic_dependency")
         result = ExecutionResult(
             cell_id=cell.id,
             success=False,
@@ -631,12 +635,165 @@ def execute_cells(
     total = len(results)
     total_duration = sum(r.duration for r in results)
 
-    print(f"execution_summary:")
-    print(f"  success={successful}/{total}")
-    print(f"  duration={total_duration:.2f}s")
+    logger.info(f"execution_summary:")
+    logger.info(f"  success={successful}/{total}")
+    logger.info(f"  duration={total_duration:.2f}s")
     if successful < total:
         failed = [r.cell_id for r in results if not r.success]
-        print(f"  failed={','.join(failed)}")
-    print(f"  status={'complete' if successful == total else 'partial'}")
+        logger.error(f"  failed={','.join(failed)}")
+    logger.info(f"  status={'complete' if successful == total else 'partial'}")
+
+    return results
+
+
+def execute_cells_cancellable(
+    cells: List[CodeCell],
+    work_dir: Path,
+    use_cache: bool = True,
+    env_vars: Optional[Dict[str, str]] = None,
+    force_rerun_cells: Optional[Set[str]] = None,
+    incremental_callback: Optional[Callable[[List["ExecutionResult"]], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> List[ExecutionResult]:
+    """Execute multiple cells with cancellation support.
+
+    Same as execute_cells but checks cancel_event before each cell execution.
+    """
+
+    def sanitize_env_key(s: str) -> str:
+        out = []
+        for ch in s:
+            if ch.isalnum():
+                out.append(ch.upper())
+            else:
+                out.append("_")
+        return "".join(out)
+
+    def topo_sort(cells: List[CodeCell]) -> Tuple[List[str], Set[str]]:
+        # Graph: edge from need -> cell.id
+        ids = {c.id for c in cells}
+        indeg: Dict[str, int] = {cid: 0 for cid in ids}
+        adj: Dict[str, List[str]] = {cid: [] for cid in ids}
+
+        for cell in cells:
+            for need in cell.needs:
+                if need in ids:
+                    adj[need].append(cell.id)
+                    indeg[cell.id] += 1
+
+        # BFS topo sort
+        from collections import deque
+
+        q = deque([cid for cid in ids if indeg[cid] == 0])
+        order = []
+        while q:
+            u = q.popleft()
+            order.append(u)
+            for v in adj.get(u, []):
+                indeg[v] -= 1
+                if indeg[v] == 0:
+                    q.append(v)
+
+        # Any nodes not in order are part of cycles
+        leftover = set(ids) - set(order)
+        return order, leftover
+
+    results: List[ExecutionResult] = []
+    executed: Dict[str, ExecutionResult] = {}
+    cells_by_id = {cell.id: cell for cell in cells}
+
+    order, cyclic = topo_sort(cells)
+
+    # Print dependency matrix
+    print_dependency_matrix(cells)
+
+    logger.info(f"execution_plan:")
+    logger.info(f"  cells={len(order)}")
+    logger.info(f"  order={' -> '.join(order)}")
+    if cyclic:
+        logger.warning(f"  warning=cyclic_dependencies cells={','.join(cyclic)}")
+    logger.info("")
+
+    # Execute in computed order
+    total_cells = len(order)
+    for i, cid in enumerate(order, 1):
+        # Check for cancellation
+        if cancel_event and cancel_event.is_set():
+            logger.warning(f"Execution cancelled at cell {i}/{total_cells}")
+            # Mark remaining cells as skipped
+            for j in range(i - 1, len(order)):
+                remaining_cell = cells_by_id[order[j]]
+                result = ExecutionResult(
+                    cell_id=remaining_cell.id,
+                    success=False,
+                    stdout="",
+                    stderr="Execution cancelled",
+                    duration=0.0,
+                    artifacts=[],
+                    cache_key=generate_cache_key(remaining_cell, work_dir, env_vars),
+                )
+                results.append(result)
+            break
+
+        logger.info(f"progress={i}/{total_cells}")
+        cell = cells_by_id[cid]
+        # Build per-cell env vars including inputs from dependencies
+        per_cell_env = dict(env_vars or {})
+        if cell.needs:
+            inputs_list: List[str] = []
+            for need in cell.needs:
+                if need in executed and executed[need].success:
+                    dep_key = executed[need].cache_key
+                    dep_dir = work_dir / ".uvnote" / "cache" / dep_key
+                    env_key = f"UVNOTE_INPUT_{sanitize_env_key(need)}"
+                    per_cell_env[env_key] = str(dep_dir)
+                    inputs_list.append(env_key)
+            if inputs_list:
+                per_cell_env["UVNOTE_INPUTS"] = ",".join(inputs_list)
+
+        result = execute_cell(
+            cell, work_dir, use_cache, per_cell_env, force_rerun_cells
+        )
+        results.append(result)
+        executed[cell.id] = result
+
+        if result.success:
+            logger.info(f"  result=success")
+        else:
+            logger.error(f"  result=failed stopping=true")
+            break
+
+        # Call incremental callback if provided
+        if incremental_callback:
+            incremental_callback(results)
+
+    # Mark any cyclic cells as failed with an explanatory message
+    for cid in cyclic:
+        cell = cells_by_id[cid]
+        logger.warning(f"cell={cell.id} status=skipped reason=cyclic_dependency")
+        result = ExecutionResult(
+            cell_id=cell.id,
+            success=False,
+            stdout="",
+            stderr="Skipped: dependency cycle detected",
+            duration=0.0,
+            artifacts=[],
+            cache_key=generate_cache_key(cell, work_dir, env_vars),
+        )
+        results.append(result)
+        executed[cid] = result
+
+    # Print execution summary
+    successful = sum(1 for r in results if r.success)
+    total = len(results)
+    total_duration = sum(r.duration for r in results)
+
+    logger.info(f"execution_summary:")
+    logger.info(f"  success={successful}/{total}")
+    logger.info(f"  duration={total_duration:.2f}s")
+    if successful < total:
+        failed = [r.cell_id for r in results if not r.success]
+        logger.error(f"  failed={','.join(failed)}")
+    logger.info(f"  status={'complete' if successful == total else 'partial'}")
 
     return results

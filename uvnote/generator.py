@@ -2,9 +2,10 @@
 
 import html
 import os
+import platform
 import shutil
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import markdown
 from jinja2 import Environment, BaseLoader
@@ -14,6 +15,17 @@ from pygments.lexers.python import PythonLexer
 
 from .executor import ExecutionResult
 from .parser import CodeCell, DocumentConfig
+
+
+def get_system_info() -> Dict[str, str]:
+    """Collect basic system information for display in generated pages."""
+    return {
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "processor": platform.processor() or "Unknown",
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+    }
 
 
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -97,6 +109,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: flex;
             gap: 0.5rem;
             z-index: 1000;
+        }
+        
+        .system-info {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+        }
+        
+        .system-info-header {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        
+        .system-info-content {
+            font-family: monospace;
         }
         
         .theme-toggle, .reset-toggle {
@@ -2054,6 +2086,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="reset-toggle" onclick="resetLayout()">reset</div>
     </div>
     
+    <div class="system-info">
+        <div class="system-info-header">Generated on:</div>
+        <div class="system-info-content">
+            {{ system_info.system }} {{ system_info.machine }} | Python {{ system_info.python_version }} | {{ system_info.platform }}
+        </div>
+    </div>
+    
     <div class="main-content">
         {{ content | safe }}
     </div>
@@ -2170,6 +2209,8 @@ HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
     body{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;line-height:1.4;max-width:960px;margin:0 auto;padding:16px;background:var(--bg);color:var(--txt)}
     .controls{position:fixed;top:16px;right:16px;display:flex;gap:8px}
     .btn{background:var(--bg2);border:1px solid var(--border);padding:6px 8px;border-radius:2px;color:var(--muted);cursor:pointer}
+    .system-info{background:var(--bg2);border:1px solid var(--border);border-radius:2px;padding:6px 8px;margin-bottom:12px;font-size:0.85em;color:var(--muted)}
+    .system-info-header{font-weight:600;color:var(--txt);margin-right:4px}
     .btn:hover{color:var(--txt)}
     .cell{margin:1rem 0;border:1px solid var(--border);border-radius:2px;background:var(--bg2)}
     .cell-header{padding:.5rem 1rem;border-bottom:1px solid var(--border);color:var(--muted)}
@@ -2204,6 +2245,7 @@ HTML_TEMPLATE_SLIM = """<!DOCTYPE html>
 </head>
 <body>
   <div class=\"controls\"><button class=\"btn theme-toggle\" onclick=\"(function(){const h=document.documentElement;const t=h.getAttribute('data-theme');const n=t==='dark'?'light':'dark';h.setAttribute('data-theme',n);try{localStorage.setItem('uvnote-theme',n)}catch(_){}})()\">theme</button></div>
+  <div class=\"system-info\"><span class=\"system-info-header\">Generated on:</span> {{ system_info.system }} {{ system_info.machine }} | Python {{ system_info.python_version }} | {{ system_info.platform }}</div>
   <main class=\"main-content\">{{ content|safe }}</main>
 </body>
 </html>"""
@@ -2420,9 +2462,16 @@ def generate_html(
     # Determine title
     title = config.title if config.title else output_path.stem
 
+    # Get system information
+    system_info = get_system_info()
+
     # Render HTML
     html = template.render(
-        title=title, config=config, content=content_html, pygments_css=pygments_css
+        title=title,
+        config=config,
+        content=content_html,
+        pygments_css=pygments_css,
+        system_info=system_info,
     )
 
     # Ensure output directory exists

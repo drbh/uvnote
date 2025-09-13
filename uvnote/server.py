@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from flask import Flask, Response, redirect  # type: ignore[import-not-found]
+from .logging_config import get_logger
+
+logger = get_logger("server")
 
 
 class Broadcaster:
@@ -46,6 +49,7 @@ def sse_stream(broadcaster: Broadcaster) -> Iterable[str]:
     """SSE generator: yields messages for a single client."""
     q = broadcaster.register()
     try:
+        logger.info("Client connected")
         yield "data: connected\n\n"
         # Heartbeat every 15s if no messages
         while True:
@@ -55,6 +59,7 @@ def sse_stream(broadcaster: Broadcaster) -> Iterable[str]:
             except queue.Empty:
                 yield ": hb\n\n"
     finally:
+        logger.info("Client disconnected")
         broadcaster.unregister(q)
 
 

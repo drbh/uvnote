@@ -9,11 +9,13 @@ import click
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from .executor import execute_cells
+from .executor import execute_cells, execute_cells_cancellable
 from .generator import generate_html
 from .parser import parse_markdown, validate_cells
 from .server import Broadcaster, create_app
 from .cache import evict_to_target, get_cache_cap_bytes, get_total_size_bytes, init_db
+from .logging_config import setup_logging, get_logger
+from .rebuild_queue import RebuildQueueManager
 
 
 class MarkdownHandler(FileSystemEventHandler):
@@ -38,9 +40,27 @@ class MarkdownHandler(FileSystemEventHandler):
 
 @click.group()
 @click.version_option()
-def main():
+@click.option(
+    "--log-file",
+    envvar="UVNOTE_LOG_FILE",
+    default="uvnote.log",
+    help="Path to log file",
+)
+@click.option(
+    "--log-level",
+    envvar="UVNOTE_LOG_LEVEL",
+    default="INFO",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+    help="Logging level",
+)
+@click.option("--console-log", is_flag=True, help="Also output logs to console")
+@click.pass_context
+def main(ctx, log_file, log_level, console_log):
     """uvnote: Stateless, deterministic notebooks with uv and Markdown."""
-    pass
+    # Set up logging
+    setup_logging(log_file=log_file, log_level=log_level, console_output=console_log)
+    ctx.ensure_object(dict)
+    ctx.obj["logger"] = get_logger("cli")
 
 
 @main.command()
@@ -53,11 +73,11 @@ def main():
 def init(name: str):
     """Initialize a new uvnote project with a markdown file containing a Python block."""
     file_path = Path(name)
-    
+
     if file_path.exists():
         click.echo(f"Error: {name} already exists", err=True)
         return 1
-    
+
     # Create the markdown file with a Python code block
     content = """# New Note
 
@@ -68,7 +88,7 @@ This is a new uvnote markdown file.
 print("Hello, uvnote!")
 ```
 """
-    
+
     try:
         file_path.write_text(content)
         click.echo(f"Created {name}")
@@ -143,8 +163,9 @@ def build(
         # For build command, we rerun ALL cells if dependencies flag is used
         all_cell_ids = {cell.id for cell in cells}
         force_rerun_cells = all_cell_ids
-        print(f"dependencies_mode: cells={len(force_rerun_cells)} rerun=all")
-        print()
+        logger = get_logger("cli")
+        logger.info(f"dependencies_mode: cells={len(force_rerun_cells)} rerun=all")
+        logger.info("")
 
     # Set up incremental callback if needed
     output_file = output / f"{file.stem}.html"
@@ -159,7 +180,8 @@ def build(
 
         staleness_summary = check_all_cells_staleness(cells, work_dir)
 
-        print("incremental_mode: preparing initial HTML with cached results")
+        logger = get_logger("cli")
+        logger.info("incremental_mode: preparing initial HTML with cached results")
         initial_results = []
         cached_initial_by_id = {}
 
@@ -197,7 +219,7 @@ def build(
                     )
                     initial_results.append(result)
                     cached_initial_by_id[cell.id] = result
-                    print(f"  {cell.id}=cached")
+                    logger.info(f"  {cell.id}=cached")
                 except Exception:
                     placeholder = ExecutionResult(
                         cell_id=cell.id,
@@ -210,7 +232,7 @@ def build(
                         is_html=True,
                     )
                     initial_results.append(placeholder)
-                    print(f"  {cell.id}=loading (cache_error)")
+                    logger.info(f"  {cell.id}=loading (cache_error)")
             else:
                 placeholder = ExecutionResult(
                     cell_id=cell.id,
@@ -224,7 +246,7 @@ def build(
                 )
                 initial_results.append(placeholder)
                 reason = "rerun" if not status["stale"] and rerun else status["reason"]
-                print(f"  {cell.id}=loading ({reason})")
+                logger.info(f"  {cell.id}=loading ({reason})")
 
         def update_html(partial_results):
             try:
@@ -255,9 +277,9 @@ def build(
                 generate_html(
                     content, config, cells, mixed_results, output_file, work_dir
                 )
-                print(f"  incremental_update: {output_file}")
+                logger.info(f"  incremental_update: {output_file}")
             except Exception as e:
-                print(f"  incremental_error: {e}")
+                logger.error(f"  incremental_error: {e}")
 
         incremental_callback = update_html
 
@@ -265,7 +287,7 @@ def build(
             generate_html(
                 content, config, cells, initial_results, output_file, work_dir
             )
-            print(f"  initial: {output_file}")
+            logger.info(f"  initial: {output_file}")
         except Exception as e:
             click.echo(f"Error generating initial HTML: {e}", err=True)
 
@@ -377,41 +399,43 @@ def run(
             else:
                 status = check_cell_staleness(target_cell, work_dir)
 
-            print("staleness_check:")
-            print(f"  cell={cell}")
-            print(f"  stale={str(status['stale']).lower()}")
-            print(f"  reason={status['reason']}")
+            logger = get_logger("cli")
+            logger.info("staleness_check:")
+            logger.info(f"  cell={cell}")
+            logger.info(f"  stale={str(status['stale']).lower()}")
+            logger.info(f"  reason={status['reason']}")
             if not status["stale"]:
-                print(f"  cached_duration={status['duration']:.2f}s")
-                print(f"  cached_success={str(status['success']).lower()}")
+                logger.info(f"  cached_duration={status['duration']:.2f}s")
+                logger.info(f"  cached_success={str(status['success']).lower()}")
         else:
             # Check all cells
             summary = check_all_cells_staleness(cells, work_dir)
 
-            print("staleness_check:")
-            print(f"  total_cells={summary['total_cells']}")
-            print(f"  stale_count={summary['stale_count']}")
-            print(f"  cached_count={summary['cached_count']}")
+            logger = get_logger("cli")
+            logger.info("staleness_check:")
+            logger.info(f"  total_cells={summary['total_cells']}")
+            logger.info(f"  stale_count={summary['stale_count']}")
+            logger.info(f"  cached_count={summary['cached_count']}")
             if summary["cyclic_count"] > 0:
-                print(f"  cyclic_count={summary['cyclic_count']}")
+                logger.info(f"  cyclic_count={summary['cyclic_count']}")
 
             if summary["stale_cells"]:
-                print(f"  stale_cells={','.join(summary['stale_cells'])}")
+                logger.info(f"  stale_cells={','.join(summary['stale_cells'])}")
             if summary["cached_cells"]:
-                print(f"  cached_cells={','.join(summary['cached_cells'])}")
+                logger.info(f"  cached_cells={','.join(summary['cached_cells'])}")
             if summary["cyclic_cells"]:
-                print(f"  cyclic_cells={','.join(summary['cyclic_cells'])}")
+                logger.info(f"  cyclic_cells={','.join(summary['cyclic_cells'])}")
 
-            print("\ndetailed_status:")
+            logger.info("\ndetailed_status:")
             for cell_id in summary["execution_order"]:
                 status = summary["cell_status"][cell_id]
                 stale_str = str(status["stale"]).lower()
-                print(f"  {cell_id}=stale={stale_str} reason={status['reason']}")
+                logger.info(f"  {cell_id}=stale={stale_str} reason={status['reason']}")
 
             for cell_id in summary["cyclic_cells"]:
                 status = summary["cell_status"][cell_id]
                 stale_str = str(status["stale"]).lower()
-                print(f"  {cell_id}=stale={stale_str} reason={status['reason']}")
+                logger.info(f"  {cell_id}=stale={stale_str} reason={status['reason']}")
 
         return 0
 
@@ -435,10 +459,11 @@ def run(
             from .executor import find_all_dependencies, execute_cells
 
             force_rerun_cells = find_all_dependencies(cells, target_cell.id)
-            print(
+            logger = get_logger("cli")
+            logger.info(
                 f"dependencies_mode: cells={len(force_rerun_cells)} rerun={','.join(sorted(force_rerun_cells))}"
             )
-            print()
+            logger.info("")
 
             # Filter cells to only those needed and execute them all in dependency order
             dependency_cells = [c for c in cells if c.id in force_rerun_cells]
@@ -490,8 +515,9 @@ def run(
             # For all cells mode, rerun all cells if dependencies flag is used
             all_cell_ids = {cell.id for cell in cells}
             force_rerun_cells = all_cell_ids
-            print(f"dependencies_mode: cells={len(force_rerun_cells)} rerun=all")
-            print()
+            logger = get_logger("cli")
+            logger.info(f"dependencies_mode: cells={len(force_rerun_cells)} rerun=all")
+            logger.info("")
 
         # Execute all cells
         try:
@@ -566,10 +592,11 @@ def build_loading(file: Path, output: Optional[Path]):
 
     staleness_summary = check_all_cells_staleness(cells, work_dir)
 
-    print("staleness_check:")
-    print(f"  total_cells={staleness_summary['total_cells']}")
-    print(f"  stale_count={staleness_summary['stale_count']}")
-    print(f"  cached_count={staleness_summary['cached_count']}")
+    logger = get_logger("cli")
+    logger.info("staleness_check:")
+    logger.info(f"  total_cells={staleness_summary['total_cells']}")
+    logger.info(f"  stale_count={staleness_summary['stale_count']}")
+    logger.info(f"  cached_count={staleness_summary['cached_count']}")
 
     # Create results: real results for cached cells, loading placeholders for stale cells
     results = []
@@ -604,7 +631,7 @@ def build_loading(file: Path, output: Optional[Path]):
                     artifacts=artifacts,
                     cache_key=cache_key,
                 )
-                print(f"  {cell.id}=cached")
+                logger.info(f"  {cell.id}=cached")
             except Exception:
                 # If we can't load cached result, treat as loading
                 result = ExecutionResult(
@@ -617,7 +644,7 @@ def build_loading(file: Path, output: Optional[Path]):
                     cache_key="loading",
                     is_html=True,
                 )
-                print(f"  {cell.id}=loading (cache_error)")
+                logger.info(f"  {cell.id}=loading (cache_error)")
         else:
             # Create loading placeholder
             result = ExecutionResult(
@@ -630,7 +657,7 @@ def build_loading(file: Path, output: Optional[Path]):
                 cache_key="loading",
                 is_html=True,
             )
-            print(f"  {cell.id}=loading ({cell_status['reason']})")
+            logger.info(f"  {cell.id}=loading ({cell_status['reason']})")
 
         results.append(result)
 
@@ -717,11 +744,12 @@ def graph(file: Path):
 
     order, cyclic = get_execution_order(cells)
 
-    print("execution_graph:")
-    print(f"  cells={len(order)}")
-    print(f"  order={' -> '.join(order)}")
+    logger = get_logger("cli")
+    logger.info("execution_graph:")
+    logger.info(f"  cells={len(order)}")
+    logger.info(f"  order={' -> '.join(order)}")
     if cyclic:
-        print(f"  warning=cyclic_dependencies cells={','.join(cyclic)}")
+        logger.warning(f"  warning=cyclic_dependencies cells={','.join(cyclic)}")
 
     return 0
 
@@ -772,12 +800,13 @@ def cache_prune(size: str | None):
     cap = parse_size(size, get_cache_cap_bytes())
     freed, removed = evict_to_target(work_dir, cap)
     after = get_total_size_bytes(work_dir)
-    print("cache_prune:")
-    print(f"  before_bytes={current}")
-    print(f"  target_bytes={cap}")
-    print(f"  freed_bytes={freed}")
-    print(f"  removed_entries={len(removed)}")
-    print(f"  after_bytes={after}")
+    logger = get_logger("cli")
+    logger.info("cache_prune:")
+    logger.info(f"  before_bytes={current}")
+    logger.info(f"  target_bytes={cap}")
+    logger.info(f"  freed_bytes={freed}")
+    logger.info(f"  removed_entries={len(removed)}")
+    logger.info(f"  after_bytes={after}")
 
 
 @main.command()
@@ -802,7 +831,9 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
 
     broadcaster = Broadcaster()
 
-    def rebuild():
+    def rebuild(cancel_event=None):
+        logger = get_logger("cli")
+        logger.debug("!!!!!!!!!!!!!! Rebuilding...")
         click.echo(f"Rebuilding {file}...")
         try:
             with open(file) as f:
@@ -834,7 +865,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                     )
                     initial_results.append(placeholder)
                     reason = "no_cache" if no_cache else status["reason"]
-                    print(f"  {cell.id}=loading ({reason})")
+                    logger.info(f"  {cell.id}=loading ({reason})")
                 else:
                     cache_key = status["cache_key"]
                     cache_dir = work_dir / ".uvnote" / "cache" / cache_key
@@ -861,7 +892,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                         )
                         initial_results.append(res)
                         cached_initial_by_id[cell.id] = res
-                        print(f"  {cell.id}=cached")
+                        logger.info(f"  {cell.id}=cached")
                     except Exception:
                         placeholder = ExecutionResult(
                             cell_id=cell.id,
@@ -874,7 +905,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                             is_html=True,
                         )
                         initial_results.append(placeholder)
-                        print(f"  {cell.id}=loading (cache_error)")
+                        logger.info(f"  {cell.id}=loading (cache_error)")
 
             # Render initial HTML so unchanged cells remain visible
             generate_html(
@@ -885,7 +916,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                 output_file,  # Use output_file which is already Path
                 work_dir,
             )
-            print(f"  initial: {output_file}")
+            logger.info(f"  initial: {output_file}")
 
             # Incremental updates merge new results with existing cached/placeholder ones
             def incremental_reload_callback(partial_results):
@@ -923,15 +954,24 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
                     )
                     broadcaster.broadcast("incremental")
                 except Exception as e:
-                    print(f"Incremental update error: {e}")
+                    logger.error(f"Incremental update error: {e}")
 
-            # Execute cells
-            results = execute_cells(
-                cells,
-                work_dir=work_dir,
-                use_cache=not no_cache,
-                incremental_callback=incremental_reload_callback,
-            )
+            # Execute cells with cancellation support
+            if cancel_event:
+                results = execute_cells_cancellable(
+                    cells,
+                    work_dir=work_dir,
+                    use_cache=not no_cache,
+                    incremental_callback=incremental_reload_callback,
+                    cancel_event=cancel_event,
+                )
+            else:
+                results = execute_cells(
+                    cells,
+                    work_dir=work_dir,
+                    use_cache=not no_cache,
+                    incremental_callback=incremental_reload_callback,
+                )
 
             # Final HTML and broadcast
             generate_html(content, config, cells, results, output_file, work_dir)
@@ -940,11 +980,63 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
         except Exception as e:
             click.echo(f"Rebuild failed: {e}", err=True)
 
+    def emit_loading_state():
+        """Generate and emit immediate loading HTML when file changes."""
+        try:
+            logger = get_logger("cli")
+            logger.info("Generating immediate loading state")
+
+            # Read and parse the current file
+            with open(file) as f:
+                content = f.read()
+            config, cells = parse_markdown(content)
+            validate_cells(cells)
+
+            # Create loading placeholders for all cells
+            from .executor import ExecutionResult
+
+            loading_results = []
+            for cell in cells:
+                loading_result = ExecutionResult(
+                    cell_id=cell.id,
+                    success=True,
+                    stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                    stderr="",
+                    duration=0.0,
+                    artifacts=[],
+                    cache_key="loading",
+                    is_html=True,
+                )
+                loading_results.append(loading_result)
+                logger.info(f"  {cell.id}=loading (file_changed)")
+
+            # Generate and emit loading HTML
+            work_dir = Path.cwd()
+            generate_html(
+                content, config, cells, loading_results, output_file, work_dir
+            )
+            broadcaster.broadcast("incremental")
+            logger.info(f"Loading state emitted: {output_file}")
+
+        except Exception as e:
+            logger.error(f"Failed to emit loading state: {e}", exc_info=True)
+
+    # Create rebuild queue manager
+    rebuild_queue = RebuildQueueManager(
+        rebuild_func=rebuild,
+        loading_func=emit_loading_state,
+        debounce_seconds=0.5,
+        min_interval_seconds=1.0,
+    )
+
     # Initial build
     rebuild()
 
-    # Watch source file
-    event_handler = MarkdownHandler(file, rebuild)
+    # Watch source file with queue manager
+    def on_file_change():
+        rebuild_queue.request_rebuild(file)
+
+    event_handler = MarkdownHandler(file, on_file_change)
     observer = Observer()
     observer.schedule(event_handler, str(file.parent), recursive=False)
     observer.start()
@@ -993,6 +1085,7 @@ def serve(file: Path, output: Optional[Path], host: str, port: int, no_cache: bo
     except KeyboardInterrupt:
         pass
     finally:
+        rebuild_queue.stop()
         observer.stop()
         observer.join()
 
@@ -1049,15 +1142,17 @@ def export(file: Path, cell: Optional[str], output: Optional[Path]):
         all_deps = find_all_dependencies(cells, cell)
         cells_to_export = all_deps | {cell}
 
-        print(f"export_target: {cell}")
+        logger = get_logger("cli")
+        logger.info(f"export_target: {cell}")
         if all_deps:
-            print(f"dependencies: {','.join(sorted(all_deps))}")
-        print(f"total_files: {len(cells_to_export)}")
+            logger.info(f"dependencies: {','.join(sorted(all_deps))}")
+        logger.info(f"total_files: {len(cells_to_export)}")
     else:
         # Export all cells
         cells_to_export = {c.id for c in cells}
-        print(f"export_mode: all_cells")
-        print(f"total_files: {len(cells_to_export)}")
+        logger = get_logger("cli")
+        logger.info(f"export_mode: all_cells")
+        logger.info(f"total_files: {len(cells_to_export)}")
 
     # Create output directory
     output.mkdir(exist_ok=True)
@@ -1073,11 +1168,11 @@ def export(file: Path, cell: Optional[str], output: Optional[Path]):
 
             shutil.copy2(source_file, target_file)
             copied_files.append(cell_id)
-            print(f"  copied: {cell_id}.py")
+            logger.info(f"  copied: {cell_id}.py")
         else:
-            print(f"  missing: {cell_id}.py")
+            logger.warning(f"  missing: {cell_id}.py")
 
-    print(f"export_complete: {len(copied_files)} files copied to {output}")
+    logger.info(f"export_complete: {len(copied_files)} files copied to {output}")
     return 0
 
 
