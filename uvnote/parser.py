@@ -33,6 +33,7 @@ class CodeCell:
     line_end: int
     collapse_code: bool = False
     collapse_output: bool = False
+    commented: bool = False
 
 
 def parse_attributes(info_string: str) -> Dict[str, str]:
@@ -122,17 +123,41 @@ def parse_markdown(content: str) -> tuple[DocumentConfig, List[CodeCell]]:
     while i < len(lines):
         line = lines[i].strip()
 
-        # Look for Python code fence
+        # Look for Python code fence (normal or commented)
+        commented = False
+        python_fence_line = None
+
         if line.startswith("```python"):
+            python_fence_line = line
+        elif line.startswith("<!-- ```python") and line.endswith("-->"):
+            # HTML comment style: <!-- ```python -->
+            python_fence_line = line[4:-3].strip()  # Remove <!-- and -->
+            commented = True
+        elif line.startswith("#") and "```python" in line:
+            # Markdown comment style: # ```python
+            python_fence_line = line.lstrip("#").strip()
+            commented = True
+
+        if python_fence_line:
             line_start = i + 1
-            attrs = parse_attributes(line)  # Full line for parsing
+            attrs = parse_attributes(python_fence_line)  # Full line for parsing
 
             # Find the end of the code block
             code_lines = []
             i += 1
-            while i < len(lines) and not lines[i].strip().startswith("```"):
-                code_lines.append(lines[i])
-                i += 1
+            while i < len(lines):
+                current_line = lines[i].strip()
+                # Check for end fence (normal or commented)
+                if current_line.startswith("```"):
+                    break
+                elif commented and (
+                    current_line.startswith("<!-- ```")
+                    or current_line.startswith("# ```")
+                ):
+                    break
+                else:
+                    code_lines.append(lines[i])
+                    i += 1
 
             if code_lines:
                 code = "\n".join(code_lines)
@@ -181,6 +206,7 @@ def parse_markdown(content: str) -> tuple[DocumentConfig, List[CodeCell]]:
                     line_end=i,
                     collapse_code=collapse_code,
                     collapse_output=collapse_output,
+                    commented=commented,
                 )
                 cells.append(cell)
 

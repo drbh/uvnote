@@ -23,39 +23,39 @@ from .rebuild_queue import RebuildQueueManager
 def resolve_file_path(file_input: str) -> Path:
     """
     Resolve file path, downloading from URL if it starts with https.
-    
+
     Args:
         file_input: File path or HTTPS URL
-        
+
     Returns:
         Path to local file (possibly in temp directory)
     """
     if file_input.startswith("https://"):
         logger = get_logger("cli")
         logger.info(f"Downloading file from {file_input}")
-        
+
         try:
             # Create temp directory for downloaded files
             temp_dir = Path(tempfile.mkdtemp(prefix="uvnote_"))
-            
+
             # Extract filename from URL or use default
-            url_path = file_input.split('/')[-1]
-            if not url_path or not url_path.endswith('.md'):
+            url_path = file_input.split("/")[-1]
+            if not url_path or not url_path.endswith(".md"):
                 filename = "downloaded.md"
             else:
                 filename = url_path
-                
+
             temp_file = temp_dir / filename
-            
+
             # Download the file
             urllib.request.urlretrieve(file_input, temp_file)
             logger.info(f"Downloaded to {temp_file}")
-            
+
             return temp_file
-            
+
         except Exception as e:
             raise click.ClickException(f"Failed to download {file_input}: {e}")
-    
+
     # Regular file path
     return Path(file_input)
 
@@ -171,7 +171,7 @@ def build(
     incremental: bool,
 ):
     """Build static HTML from markdown file."""
-    
+
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
 
@@ -396,7 +396,7 @@ def run(
     check: bool,
 ):
     """Run cells from markdown file."""
-    
+
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
     work_dir = resolved_file.parent
@@ -606,7 +606,7 @@ def run(
 )
 def build_loading(file: str, output: Optional[Path]):
     """Build HTML with loading placeholders for stale cells."""
-    
+
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
 
@@ -733,7 +733,7 @@ def build_loading(file: str, output: Optional[Path]):
 @click.argument("file", type=str)
 def graph(file: str):
     """Show dependency graph for markdown file."""
-    
+
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
 
@@ -1094,7 +1094,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
 
     # Watch source file with queue manager
     def on_file_change():
-        rebuild_queue.request_rebuild(str(resolved_file))
+        rebuild_queue.request_rebuild(resolved_file)
 
     event_handler = MarkdownHandler(resolved_file, on_file_change)
     observer = Observer()

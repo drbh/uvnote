@@ -503,6 +503,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: var(--bg-error);
             color: var(--text-error);
         }
+        .cell-commented {
+            opacity: 0.6;
+            border-style: dashed;
+        }
+        .cell-commented .cell-header {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-style: italic;
+        }
         .run-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--border-primary);
@@ -2121,6 +2130,8 @@ def render_cell(
     cell_class = "cell"
     if not result.success:
         cell_class += " cell-failed"
+    if cell.commented:
+        cell_class += " cell-commented"
 
     html_parts = [f'<div class="{cell_class}">']
 
@@ -2132,6 +2143,8 @@ def render_cell(
         header_parts.append(f"{result.duration:.2f}s")
     if not result.success:
         header_parts.append("FAILED")
+    if cell.commented:
+        header_parts.append("COMMENTED")
 
     # Add collapse indicators to header
     code_indicator = "▶" if cell.collapse_code else "▼"

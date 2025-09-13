@@ -584,6 +584,25 @@ def execute_cells(
     for i, cid in enumerate(order, 1):
         logger.info(f"progress={i}/{total_cells}")
         cell = cells_by_id[cid]
+
+        # Skip commented out cells
+        if cell.commented:
+            logger.info(f"cell={cell.id}")
+            logger.info(f"  status=skipped (commented)")
+            # Create a skipped result
+            result = ExecutionResult(
+                cell_id=cell.id,
+                success=True,
+                stdout="Cell is commented out and was skipped",
+                stderr="",
+                duration=0.0,
+                artifacts=[],
+                cache_key="commented",
+            )
+            results.append(result)
+            executed[cell.id] = result
+            continue
+
         # Build per-cell env vars including inputs from dependencies
         per_cell_env = dict(env_vars or {})
         if cell.needs:
@@ -737,6 +756,25 @@ def execute_cells_cancellable(
 
         logger.info(f"progress={i}/{total_cells}")
         cell = cells_by_id[cid]
+
+        # Skip commented out cells
+        if cell.commented:
+            logger.info(f"cell={cell.id}")
+            logger.info(f"  status=skipped (commented)")
+            # Create a skipped result
+            result = ExecutionResult(
+                cell_id=cell.id,
+                success=True,
+                stdout="Cell is commented out and was skipped",
+                stderr="",
+                duration=0.0,
+                artifacts=[],
+                cache_key="commented",
+            )
+            results.append(result)
+            executed[cell.id] = result
+            continue
+
         # Build per-cell env vars including inputs from dependencies
         per_cell_env = dict(env_vars or {})
         if cell.needs:
