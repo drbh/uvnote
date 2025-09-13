@@ -1548,6 +1548,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             };
             row.appendChild(eraseBtn);
 
+            // Spotlight tool
+            const spotlightBtn = document.createElement('div');
+            spotlightBtn.className = 'tool-button';
+            spotlightBtn.textContent = 'spotlight';
+            spotlightBtn.onclick = function() {
+                const isActive = spotlightBtn.classList.contains('active');
+                if (isActive) {
+                    spotlightBtn.classList.remove('active');
+                    setActiveTool('none');
+                } else {
+                    tools.querySelectorAll('.tool-button').forEach(b => b.classList.remove('active'));
+                    spotlightBtn.classList.add('active');
+                    setActiveTool('spotlight');
+                }
+            };
+            row.appendChild(spotlightBtn);
+
             // Clear all
             const clearBtn = document.createElement('div');
             clearBtn.className = 'tool-button';
@@ -1570,6 +1587,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } else if (saved === 'eraser') {
                 eraseBtn.classList.add('active');
                 setActiveTool('eraser');
+            } else if (saved === 'spotlight') {
+                spotlightBtn.classList.add('active');
+                setActiveTool('spotlight');
             }
 
             // Color selector
@@ -1829,6 +1849,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 startDrawPen(e);
             } else if (tool === 'eraser') {
                 eraseAt(e);
+            } else if (tool === 'spotlight') {
+                startDrawSpotlight(e);
             }
         }
 
@@ -1848,6 +1870,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             
             if (_drawing.type === 'pen') {
                 moveDrawPen(e);
+            } else if (_drawing.type === 'spotlight') {
+                moveDrawSpotlight(e);
             } else {
                 moveDrawArrow(e);
             }
@@ -1869,6 +1893,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!_drawing) return;
             if (_drawing.type === 'pen') {
                 endDrawPen();
+            } else if (_drawing.type === 'spotlight') {
+                endDrawSpotlight();
             } else {
                 endDrawArrow();
             }
@@ -1947,6 +1973,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     opacity: 1.0
                 });
             }
+            _drawing = null;
+            saveShapes();
+            renderOverlay();
+        }
+
+        function startDrawSpotlight(e) {
+            if (document.body.dataset.tool !== 'spotlight') return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            _drawing = {
+                type: 'spotlight',
+                x: pt.x + containerScrollLeft(),
+                y: pt.y + containerScrollTop(),
+                radius: getLineThickness() * 20, // Use thickness to control spotlight size (bigger default)
+                color: getArrowColor()
+            };
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function moveDrawSpotlight(e) {
+            if (!_drawing || _drawing.type !== 'spotlight') return;
+            const pt = toCanvasCoords(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+            const dx = pt.x + containerScrollLeft() - _drawing.x;
+            const dy = pt.y + containerScrollTop() - _drawing.y;
+            _drawing.radius = Math.max(20, Math.sqrt(dx * dx + dy * dy)); // Minimum radius of 20
+            renderOverlay();
+            e.preventDefault();
+        }
+
+        function endDrawSpotlight() {
+            if (!_drawing || _drawing.type !== 'spotlight') return;
+            _shapes.push({ 
+                ..._drawing,
+                createdAt: Date.now(),
+                opacity: 1.0
+            });
             _drawing = null;
             saveShapes();
             renderOverlay();
@@ -2085,12 +2147,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             ctx.globalAlpha = oldAlpha;
         }
 
+        function drawAllSpotlights(ctx, spotlights, offX, offY) {
+            if (!spotlights || spotlights.length === 0) return;
+            
+            ctx.save();
+            
+            // Calculate the overall opacity based on all spotlights
+            const maxOpacity = Math.max(...spotlights.map(s => s.opacity || 1.0));
+            
+            // Fill entire canvas with dark overlay
+            ctx.fillStyle = `rgba(0, 0, 0, ${0.7 * maxOpacity})`;
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            
+            // Cut out completely transparent holes for all spotlights
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.fillStyle = 'rgba(0, 0, 0, 1)'; // Solid black to ensure complete removal
+            for (const spotlight of spotlights) {
+                ctx.beginPath();
+                ctx.arc(spotlight.x - offX, spotlight.y - offY, spotlight.radius, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+
         function renderOverlay() {
             if (!_overlay || !_overlayCtx) return;
             _overlayCtx.clearRect(0, 0, _overlay.width, _overlay.height);
             const offX = containerScrollLeft();
             const offY = containerScrollTop();
-            // Draw committed shapes for current mode
+            // Draw non-spotlight shapes first
             for (const s of _shapes) {
                 const opacity = s.opacity !== undefined ? s.opacity : 1.0;
                 if (s.type === 'arrow') {
@@ -2099,40 +2185,87 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     drawPen(_overlayCtx, s.points, s.color || '#f00', s.width || 2, offX, offY, opacity);
                 }
             }
-            // Draw current drawing
+            // Draw current drawing (non-spotlight)
             if (_drawing) {
                 if (_drawing.type === 'pen') {
                     drawPen(_overlayCtx, _drawing.points, _drawing.color, _drawing.width, offX, offY);
-                } else {
+                } else if (_drawing.type !== 'spotlight') {
                     drawArrow(_overlayCtx, _drawing.x1 - offX, _drawing.y1 - offY, _drawing.x2 - offX, _drawing.y2 - offY, _drawing.color, _drawing.width);
                 }
             }
             
-            // Draw cursor dot when tool is active
+            // Collect all spotlights (existing + current drawing + cursor preview)
+            const spotlights = [];
+            
+            // Add existing spotlight shapes
+            for (const s of _shapes) {
+                if (s.type === 'spotlight') {
+                    spotlights.push({
+                        x: s.x,
+                        y: s.y, 
+                        radius: s.radius,
+                        opacity: s.opacity !== undefined ? s.opacity : 1.0
+                    });
+                }
+            }
+            
+            // Add current spotlight being drawn
+            if (_drawing && _drawing.type === 'spotlight') {
+                spotlights.push({
+                    x: _drawing.x,
+                    y: _drawing.y,
+                    radius: _drawing.radius,
+                    opacity: 1.0
+                });
+            }
+            
+            // Add cursor preview spotlight if tool is active
+            if (_cursorVisible && !_drawing) {
+                const tool = document.body.dataset.tool;
+                if (tool === 'spotlight') {
+                    const thickness = getLineThickness();
+                    const radius = thickness * 20;
+                    const cursorWorldX = _cursorX + containerScrollLeft();
+                    const cursorWorldY = _cursorY + containerScrollTop();
+                    spotlights.push({
+                        x: cursorWorldX,
+                        y: cursorWorldY,
+                        radius: radius,
+                        opacity: 0.8
+                    });
+                }
+            }
+            
+            // Draw all spotlights as a single overlay with multiple holes
+            drawAllSpotlights(_overlayCtx, spotlights, offX, offY);
+            
+            // Draw cursor indicators for non-spotlight tools
             if (_cursorVisible && !_drawing) {
                 const tool = document.body.dataset.tool;
                 const color = getArrowColor();
                 const thickness = getLineThickness();
                 
-                _overlayCtx.save();
-                _overlayCtx.fillStyle = color;
-                _overlayCtx.globalAlpha = 0.7;
-                
-                if (tool === 'eraser') {
-                    // Draw eraser indicator
-                    _overlayCtx.strokeStyle = color;
-                    _overlayCtx.lineWidth = 2;
-                    _overlayCtx.beginPath();
-                    _overlayCtx.arc(_cursorX, _cursorY, 10, 0, 2 * Math.PI);
-                    _overlayCtx.stroke();
-                } else {
-                    // Draw dot for pen/arrow
-                    _overlayCtx.beginPath();
-                    _overlayCtx.arc(_cursorX, _cursorY, thickness / 2, 0, 2 * Math.PI);
-                    _overlayCtx.fill();
+                if (tool !== 'spotlight') {
+                    _overlayCtx.save();
+                    _overlayCtx.fillStyle = color;
+                    _overlayCtx.globalAlpha = 0.7;
+                    
+                    if (tool === 'eraser') {
+                        // Draw eraser indicator
+                        _overlayCtx.strokeStyle = color;
+                        _overlayCtx.lineWidth = 2;
+                        _overlayCtx.beginPath();
+                        _overlayCtx.arc(_cursorX, _cursorY, 10, 0, 2 * Math.PI);
+                        _overlayCtx.stroke();
+                    } else {
+                        // Draw dot for pen/arrow
+                        _overlayCtx.beginPath();
+                        _overlayCtx.arc(_cursorX, _cursorY, thickness / 2, 0, 2 * Math.PI);
+                        _overlayCtx.fill();
+                    }
+                    
+                    _overlayCtx.restore();
                 }
-                
-                _overlayCtx.restore();
             }
         }
 

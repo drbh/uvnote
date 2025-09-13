@@ -1075,7 +1075,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
             # Copy cell files to output directory for URL access
             try:
                 cells_src = work_dir / ".uvnote" / "cells"
-                cells_dst = output / "cells"
+                cells_dst = output_file.parent / "cells"
 
                 if cells_src.exists():
                     # Remove existing cells directory if it exists
