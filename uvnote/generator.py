@@ -511,6 +511,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: var(--text-error);
             white-space: pre-wrap;
         }
+        .uv-install-logs {
+            margin: 0.5rem 0;
+        }
+        .uv-logs-header {
+            cursor: pointer;
+            padding: 0.75rem;
+            border-left: 3px solid var(--border-color);
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+        .uv-logs-content {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-left: 3px solid var(--border-color);
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            overflow-x: auto;
+        }
         .cell-artifacts {
             margin: 1rem 0;
         }
@@ -1004,6 +1026,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (outputElement) {
                 outputElement.classList.toggle('collapsed');
                 updateIndicators(cellId);
+            }
+        }
+
+        function toggleUvLogs(headerElement) {
+            const contentElement = headerElement.nextElementSibling;
+            if (contentElement) {
+                const isCollapsed = contentElement.style.display === 'none';
+                contentElement.style.display = isCollapsed ? 'block' : 'none';
+                headerElement.textContent = isCollapsed ? '▼ UV Install Logs' : '▶ UV Install Logs';
+
+                // Update the header indicator if it exists
+                const uvLogsDiv = headerElement.parentElement;
+                if (uvLogsDiv && uvLogsDiv.id && uvLogsDiv.id.startsWith('uv-logs-')) {
+                    const cellId = uvLogsDiv.id.replace('uv-logs-', '');
+                    const indicatorElement = document.getElementById('uv-indicator-' + cellId);
+                    if (indicatorElement) {
+                        indicatorElement.textContent = isCollapsed ? '▼ uv-logs' : '▶ uv-logs';
+                    }
+                }
+            }
+        }
+
+        function toggleUvLogsFromHeader(cellId) {
+            const uvLogsElement = document.getElementById('uv-logs-' + cellId);
+            const indicatorElement = document.getElementById('uv-indicator-' + cellId);
+            if (uvLogsElement) {
+                const headerElement = uvLogsElement.querySelector('.uv-logs-header');
+                const contentElement = uvLogsElement.querySelector('.uv-logs-content');
+                if (contentElement && headerElement) {
+                    const isCollapsed = contentElement.style.display === 'none';
+                    contentElement.style.display = isCollapsed ? 'block' : 'none';
+                    headerElement.textContent = isCollapsed ? '▼ UV Install Logs' : '▶ UV Install Logs';
+                    if (indicatorElement) {
+                        indicatorElement.textContent = isCollapsed ? '▼ uv-logs' : '▶ uv-logs';
+                    }
+                }
             }
         }
         
@@ -2357,6 +2415,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (fe && fe.parentNode) fe.parentNode.removeChild(fe);
         }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function runCell(cellId){
             const btn=document.querySelector('.run-btn[onclick*="'+cellId+'"]');
             const output=document.getElementById('output-'+cellId);
@@ -2366,8 +2430,45 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 if(output){
                     output.classList.remove('output-stale');
                     let html='';
-                    if(data.stdout) html+='<div class="cell-stdout">'+data.stdout+'</div>';
-                    if(data.stderr) html+='<div class="cell-stderr">'+data.stderr+'</div>';
+                    if(data.stdout) html+='<div class="cell-stdout">'+escapeHtml(data.stdout)+'</div>';
+                    console.log('UV Logs:', data);
+                    if(data.stderr) {
+                        // Split UV logs from regular stderr
+                        const lines = data.stderr.split('\\n');
+                        let uvLogs = [];
+                        let regularLogs = [];
+                        let inUvSection = true;
+
+                        for (const line of lines) {
+                            if (inUvSection) {
+                                uvLogs.push(line);
+                                if (line.startsWith('Installed ')) {
+                                    inUvSection = false;
+                                }
+                            } else {
+                                regularLogs.push(line);
+                            }
+                        }
+                        
+
+                        // If we never found "Installed", treat it all as regular stderr
+                        if (inUvSection) {
+                            html+='<div class="cell-stderr">'+escapeHtml(data.stderr)+'</div>';
+                        } else {
+                            const uvLogsStr = uvLogs.join('\\n');
+                            const regularLogsStr = regularLogs.join('\\n').trim();
+
+                            if (uvLogsStr) {
+                                html+='<div class="uv-install-logs">';
+                                html+='<div class="uv-logs-header" onclick="toggleUvLogs(this)">▶ UV Install Logs</div>';
+                                html+='<div class="uv-logs-content" style="display: none;">'+escapeHtml(uvLogsStr)+'</div>';
+                                html+='</div>';
+                            }
+                            if (regularLogsStr) {
+                                html+='<div class="cell-stderr">'+escapeHtml(regularLogsStr)+'</div>';
+                            }
+                        }
+                    }
                     output.innerHTML=html;
                 }
                 if(btn){btn.textContent='▶ run';btn.disabled=false;}
@@ -2560,6 +2661,33 @@ def highlight_code(code: str, config: DocumentConfig) -> str:
     return highlight(code, lexer, formatter)
 
 
+def split_uv_install_logs(stderr: str) -> tuple[str, str]:
+    """Split stderr into UV install logs and regular stderr.
+
+    Returns:
+        (uv_install_logs, regular_stderr)
+    """
+    lines = stderr.split('\n')
+    uv_logs = []
+    regular_logs = []
+    in_uv_section = True
+
+    for line in lines:
+        if in_uv_section:
+            uv_logs.append(line)
+            # Check if we've reached the end of UV install logs
+            if line.startswith('Installed '):
+                in_uv_section = False
+        else:
+            regular_logs.append(line)
+
+    # If we never found "Installed", treat it all as regular stderr
+    if in_uv_section:
+        return "", stderr
+
+    return '\n'.join(uv_logs), '\n'.join(regular_logs).strip()
+
+
 def render_cell(
     cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path
 ) -> str:
@@ -2583,6 +2711,11 @@ def render_cell(
     if cell.commented:
         header_parts.append("COMMENTED")
 
+    # Check if UV logs exist
+    uv_logs = ""
+    if result.stderr:
+        uv_logs, _ = split_uv_install_logs(result.stderr)
+
     # Add collapse indicators to header
     code_indicator = "▶" if cell.collapse_code else "▼"
     output_indicator = "▶" if cell.collapse_output else "▼"
@@ -2595,6 +2728,17 @@ def render_cell(
     html_parts.append(
         f'<span onclick="toggleOutput(\'{cell.id}\')" style="cursor: pointer;">{output_indicator} output</span>'
     )
+
+    # Always add UV logs indicator, gray out if no logs
+    if uv_logs:
+        html_parts.append(
+            f' <span id="uv-indicator-{cell.id}" onclick="toggleUvLogsFromHeader(\'{cell.id}\')" style="cursor: pointer;">▶ uv-logs</span>'
+        )
+    else:
+        html_parts.append(
+            f' <span id="uv-indicator-{cell.id}" style="cursor: default; opacity: 0.3;">▶ uv-logs</span>'
+        )
+
     html_parts.append(f"</span> | ")
     html_parts.append(" | ".join(header_parts))
     html_parts.append(
@@ -2631,9 +2775,26 @@ def render_cell(
             )
 
     if result.stderr:
-        html_parts.append(
-            f'<div class="cell-stderr">{html.escape(result.stderr)}</div>'
-        )
+        uv_logs, regular_stderr = split_uv_install_logs(result.stderr)
+
+        # Add UV install logs in a collapsed box if present
+        if uv_logs:
+            html_parts.append(f'<div class="uv-install-logs" id="uv-logs-{cell.id}">')
+            html_parts.append(
+                f'<div class="uv-logs-header" onclick="toggleUvLogs(this)">▶ UV Install Logs</div>'
+            )
+            html_parts.append(
+                f'<div class="uv-logs-content" style="display: none;">'
+            )
+            html_parts.append(html.escape(uv_logs))
+            html_parts.append('</div>')
+            html_parts.append('</div>')
+
+        # Add regular stderr if present
+        if regular_stderr:
+            html_parts.append(
+                f'<div class="cell-stderr">{html.escape(regular_stderr)}</div>'
+            )
 
     if result.artifacts:
         html_parts.append('<div class="cell-artifacts">')
