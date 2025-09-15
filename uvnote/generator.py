@@ -1446,6 +1446,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 localStorage.setItem('uvnote-active-tool', 'none');
                 setOverlayActive(false);
                 _cursorVisible = false;
+                // Remove active class from all tool buttons when deactivating
+                const toolButtons = document.querySelectorAll('.tools-widget .tool-button');
+                toolButtons.forEach(btn => btn.classList.remove('active'));
                 return;
             }
             document.body.dataset.tool = tool;
@@ -1453,6 +1456,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             setOverlayActive(true);
             _cursorVisible = true;
         }
+
+        // Make setActiveTool globally accessible for ESC key handler
+        window.setActiveTool = setActiveTool;
 
         function getArrowColor() {
             const saved = localStorage.getItem('uvnote-arrow-color');
@@ -1653,7 +1659,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
 
             function rgbToHex(rgb) {
-                const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+                const m = rgb.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
                 if (!m) return '#000000';
                 const r = parseInt(m[1]).toString(16).padStart(2, '0');
                 const g = parseInt(m[2]).toString(16).padStart(2, '0');
@@ -2491,6 +2497,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             initializeWidgetVisibility();
             layoutWidgetsStackedBottomRight();
             window.addEventListener('resize', layoutWidgetsStackedBottomRight);
+
+            // Add ESC key handler to exit tools
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' || e.keyCode === 27) {
+                    const currentTool = document.body.dataset.tool;
+                    if (currentTool && currentTool !== 'none') {
+                        // Deactivate the current tool
+                        window.setActiveTool('none');
+                    }
+                }
+            });
         });
     </script>
 </head>

@@ -163,6 +163,7 @@ def check_all_cells_staleness(cells: List[CodeCell], work_dir: Path) -> dict:
                     # Use the cache key as a proxy for the cache directory
                     dep_key = executed[need]["cache_key"]
                     dep_dir = work_dir / ".uvnote" / "cache" / dep_key
+                    dep_dir = dep_dir.resolve() # make it absolute path
                     env_key = f"UVNOTE_INPUT_{sanitize_env_key(need)}"
                     per_cell_env[env_key] = str(dep_dir)
                     inputs_list.append(env_key)
@@ -611,6 +612,7 @@ def execute_cells(
                 if need in executed and executed[need].success:
                     dep_key = executed[need].cache_key
                     dep_dir = work_dir / ".uvnote" / "cache" / dep_key
+                    dep_dir = dep_dir.resolve()  # make it absolute path
                     env_key = f"UVNOTE_INPUT_{sanitize_env_key(need)}"
                     per_cell_env[env_key] = str(dep_dir)
                     inputs_list.append(env_key)
