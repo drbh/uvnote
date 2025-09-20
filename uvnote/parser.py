@@ -13,11 +13,14 @@ class DocumentConfig:
 
     title: str = ""
     author: str = ""
-    theme: str = "dark"  # "dark", "light", or "auto"
+    theme: str = "dark"  # color scheme: "dark", "light", or "auto"
+    ui_theme: Optional[str] = None  # css theme: "default" or "none"; None = unspecified
+    show_widgets: Optional[bool] = None  # widgets/menu visibility; None = default (on)
     syntax_theme: str = "monokai"  # pygments style name
     show_line_numbers: bool = False
     collapse_code: bool = True
     custom_css: str = ""
+    code_font_size: Optional[Any] = None  # CSS size token or number (px)
 
 
 @dataclass
@@ -97,14 +100,23 @@ def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
         frontmatter_data = {}
 
     # Create config with defaults
+    # Support both 'widgets' and 'show_widgets' keys
+    _widgets_value = frontmatter_data.get("widgets")
+    if _widgets_value is None:
+        _widgets_value = frontmatter_data.get("show_widgets")
+
     config = DocumentConfig(
         title=frontmatter_data.get("title", ""),
         author=frontmatter_data.get("author", ""),
         theme=frontmatter_data.get("theme", "dark"),
+        # If not specified in frontmatter, leave None so template can decide precedence
+        ui_theme=frontmatter_data.get("ui_theme"),
+        show_widgets=_widgets_value,
         syntax_theme=frontmatter_data.get("syntax_theme", "monokai"),
         show_line_numbers=frontmatter_data.get("show_line_numbers", False),
         collapse_code=frontmatter_data.get("collapse_code", False),
         custom_css=frontmatter_data.get("custom_css", ""),
+        code_font_size=frontmatter_data.get("code_font_size"),
     )
 
     # Return remaining content

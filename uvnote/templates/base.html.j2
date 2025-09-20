@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+{% include 'head.html.j2' %}
+
+<body>
+    <div class="controls">
+        <div class="controls-buttons">
+            <div class="theme-toggle" onclick="toggleTheme()">light</div>
+            <div class="reset-toggle" onclick="resetLayout()">reset</div>
+            <div class="menu-button" onclick="toggleMenu()">
+                menu ▼
+                <div class="menu-dropdown">
+                    <div class="menu-item" onclick="setUiTheme('default')">
+                        <span class="menu-checkbox" id="checkbox-ui-default">☑</span> Theme: default
+                    </div>
+                    <div class="menu-item" onclick="setUiTheme('none')">
+                        <span class="menu-checkbox" id="checkbox-ui-none">☐</span> Theme: none
+                    </div>
+                    <div class="menu-item" onclick="setUiTheme('monocolor')">
+                        <span class="menu-checkbox" id="checkbox-ui-monocolor">☐</span> Theme: monocolor
+                    </div>
+                    <div class="menu-item" onclick="toggleWidget('tools')">
+                        <span class="menu-checkbox" id="checkbox-tools">☐</span> Tools
+                    </div>
+                    <div class="menu-item" onclick="toggleWidget('file-explorer')">
+                        <span class="menu-checkbox" id="checkbox-file-explorer">☐</span> File Explorer
+                    </div>
+                    <div class="menu-item" onclick="toggleWidget('minimap')">
+                        <span class="menu-checkbox" id="checkbox-minimap">☐</span> Table of Contents
+                    </div>
+                    <div class="menu-item" onclick="toggleWidget('status')">
+                        <span class="menu-checkbox" id="checkbox-status">☑</span> Status Indicator
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="system-info">
+        <div class="system-info-header">Generated on:</div>
+        <div class="system-info-content">
+            {{ system_info.system }} {{ system_info.machine }} | {{ system_info.platform }}
+        </div>
+    </div>
+    
+    <div class="main-content">
+        {{ content | safe }}
+    </div>
+    
+</body>
+</html>

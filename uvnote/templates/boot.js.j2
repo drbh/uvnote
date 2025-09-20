@@ -1,0 +1,23 @@
+// Apply theme and widget visibility immediately to prevent flicker
+        (function() {
+            const configTheme = '{{ config.theme }}';
+            const hasConfigUi = {{ 'true' if config.ui_theme is not none else 'false' }};
+            const configUi = hasConfigUi ? '{{ config.ui_theme }}' : null;
+            const hasWidgetsConfig = {{ 'true' if config.show_widgets is not none else 'false' }};
+            const widgetsOn = hasWidgetsConfig ? {{ 'true' if config.show_widgets else 'false' }} : true;
+            let theme;
+            if (configTheme === 'auto') {
+                theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            } else {
+                theme = localStorage.getItem('uvnote-theme') || configTheme;
+            }
+            document.documentElement.setAttribute('data-theme', theme);
+
+            // Initialize UI theme (css theme)
+            let ui = hasConfigUi ? configUi : (localStorage.getItem('uvnote-ui') || 'default');
+            if (ui !== 'default' && ui !== 'none' && ui !== 'monocolor') { ui = 'default'; }
+            document.documentElement.setAttribute('data-ui', ui);
+
+            // Apply widgets visibility
+            document.documentElement.setAttribute('data-widgets', widgetsOn ? 'on' : 'off');
+        })();
