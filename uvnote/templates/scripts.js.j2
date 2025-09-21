@@ -467,6 +467,27 @@
             } catch (_) {}
         }
         
+        function captureInitialCellStates() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const cellId = cell.id.replace('cell-', '');
+                const codeEl = document.getElementById('code-' + cellId);
+                const outputEl = document.getElementById('output-' + cellId);
+                
+                if (codeEl || outputEl) {
+                    const state = {};
+                    if (codeEl) {
+                        state.c = codeEl.classList.contains('collapsed') ? 0 : 1;
+                    }
+                    if (outputEl) {
+                        state.o = outputEl.classList.contains('collapsed') ? 0 : 1;
+                    }
+                    _initialCellStates[cellId] = state;
+                }
+            });
+            console.log('Captured initial cell states:', _initialCellStates);
+        }
+
         function encodeCellStatesToUrl() {
             // Get all cells and their collapse states
             const cells = document.querySelectorAll('.cell');
@@ -478,38 +499,51 @@
                 const cellId = cell.id.replace('cell-', '');
                 const codeEl = document.getElementById('code-' + cellId);
                 const outputEl = document.getElementById('output-' + cellId);
+                const initialState = _initialCellStates[cellId] || {};
                 
                 console.log(`Encoding cell ${cellId}:`, {
                     codeEl: !!codeEl,
                     outputEl: !!outputEl,
                     codeCollapsed: codeEl ? codeEl.classList.contains('collapsed') : 'N/A',
                     outputCollapsed: outputEl ? outputEl.classList.contains('collapsed') : 'N/A',
-                    codeVisible: codeEl ? getComputedStyle(codeEl).display !== 'none' : 'N/A',
-                    outputVisible: outputEl ? getComputedStyle(outputEl).display !== 'none' : 'N/A',
-                    codeClasses: codeEl ? Array.from(codeEl.classList) : 'N/A',
-                    outputClasses: outputEl ? Array.from(outputEl.classList) : 'N/A'
+                    initialState: initialState
                 });
                 
                 if (codeEl || outputEl) {
                     const state = {};
+                    let hasChanges = false;
                     
                     if (codeEl) {
-                        state.c = codeEl.classList.contains('collapsed') ? 0 : 1; // code: 0=collapsed, 1=expanded
+                        const currentCodeState = codeEl.classList.contains('collapsed') ? 0 : 1;
+                        const initialCodeState = initialState.c;
+                        // Only encode if different from initial state
+                        if (initialCodeState !== undefined && currentCodeState !== initialCodeState) {
+                            state.c = currentCodeState;
+                            hasChanges = true;
+                        }
                     }
                     
                     if (outputEl) {
-                        state.o = outputEl.classList.contains('collapsed') ? 0 : 1; // output: 0=collapsed, 1=expanded
+                        const currentOutputState = outputEl.classList.contains('collapsed') ? 0 : 1;
+                        const initialOutputState = initialState.o;
+                        // Only encode if different from initial state
+                        if (initialOutputState !== undefined && currentOutputState !== initialOutputState) {
+                            state.o = currentOutputState;
+                            hasChanges = true;
+                        }
                     }
                     
-                    // Always include cell states - let URL determine what to restore
-                    cellStates[cellId] = state;
-                    console.log(`Added cell ${cellId}:`, state);
+                    // Only include cell if it has changes from initial state
+                    if (hasChanges) {
+                        cellStates[cellId] = state;
+                        console.log(`Added cell ${cellId}:`, state);
+                    }
                 }
             });
             
             console.log('Final cell states to encode:', cellStates);
             
-            // Return empty string if no collapsed cells
+            // Return empty string if no changed cells
             if (Object.keys(cellStates).length === 0) return '';
             
             // Encode as compact base64 string
@@ -683,6 +717,11 @@
         }
         
         function encodeToolStateToUrl() {
+            // Don't update URL during initialization
+            if (_isInitializing) {
+                return window.location.href;
+            }
+            
             const params = new URLSearchParams(window.location.search);
             
             // Check if tools widget is visible and has an active tool
@@ -699,12 +738,17 @@
                 params.delete('shapes');
             }
             
-            // Always handle cell states
-            const encodedCellStates = encodeCellStatesToUrl();
-            if (encodedCellStates) {
-                params.set('cells', encodedCellStates);
+            // Always preserve existing cell states from URL if present
+            const existingCellStates = params.get('cells');
+            if (existingCellStates) {
+                // Keep existing cell states - don't re-encode from DOM
+                params.set('cells', existingCellStates);
             } else {
-                params.delete('cells');
+                // Only encode new cell states if none exist in URL
+                const encodedCellStates = encodeCellStatesToUrl();
+                if (encodedCellStates) {
+                    params.set('cells', encodedCellStates);
+                }
             }
             
             if (toolsWidgetVisible && hasActiveTool) {
@@ -1220,7 +1264,7 @@
         function getLineThickness() {
             const saved = localStorage.getItem('uvnote-line-thickness');
             if (saved) return parseInt(saved, 10);
-            return 4; // default thickness
+            return 6; // default thickness
         }
 
         function setStoredLineThickness(thickness) {
@@ -1511,6 +1555,8 @@
         let _shapes = []; // committed shapes for current mode
         let _fadeTimer = null; // timer for fade animation
         let _urlLoadedTool = false; // track if tool was loaded from URL
+        let _isInitializing = true; // prevent URL updates during initialization
+        let _initialCellStates = {}; // track initial cell states from page load
 
         function getOverlayStorageKey() { return 'uvnote-shapes'; }
 
@@ -2296,6 +2342,9 @@
 
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Capture initial cell states before any modifications
+            captureInitialCellStates();
+            
             updateThemeIcon();
             updateUiMenu();
             updateUiDebug();
@@ -2315,25 +2364,30 @@
             applyLocationFromUrl();
             updateStateIndicator();
             
-            // Apply cell states from URL as the very last step to override any initial state
-            setTimeout(() => {
-                const url = new URL(window.location.href);
-                const encodedCellStates = url.searchParams.get('cells');
-                if (encodedCellStates) {
-                    // Check if tools or shapes are also present (which might interfere)
-                    const hasTools = url.searchParams.has('tools') || url.searchParams.has('tool');
-                    const hasShapes = url.searchParams.has('shapes');
-                    
-                    console.log('Final application of cell states from URL...', {
-                        hasTools,
-                        hasShapes,
-                        delay: hasTools || hasShapes ? 'extended' : 'normal'
-                    });
-                    
-                    const cellStates = decodeCellStatesFromUrl(encodedCellStates);
+            // Apply cell states from URL immediately
+            const url = new URL(window.location.href);
+            const encodedCellStates = url.searchParams.get('cells');
+            if (encodedCellStates) {
+                console.log('Applying cell states from URL...');
+                const cellStates = decodeCellStatesFromUrl(encodedCellStates);
+                
+                // Use requestAnimationFrame to ensure DOM is ready
+                requestAnimationFrame(() => {
                     applyCellStatesFromUrl(cellStates);
+                    
+                    // Clear initialization flag after cell states are applied
+                    if (typeof _isInitializing !== 'undefined') {
+                        _isInitializing = false;
+                    }
+                });
+            } else {
+                // Clear initialization flag even if no cell states
+                if (typeof _isInitializing !== 'undefined') {
+                    requestAnimationFrame(() => {
+                        _isInitializing = false;
+                    });
                 }
-            }, 1000); // Extended delay to ensure tools/shapes don't interfere
+            }
 
             // Bind drag selection on line numbers
             document.addEventListener('mousedown', onLineNumberMouseDown);
