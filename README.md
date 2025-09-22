@@ -116,16 +116,38 @@ Commands:
   serve          Watch markdown file, rebuild on changes, and serve HTML...
 ```
 
-### Preview
+### Frontmatter options
 
-> [!NOTE]
-> the vscode extension may be deprecated in the future as uvnote as the serve command can be used to serve a live preview.
+You can specify some options in the frontmatter of the markdown file to customize the behavior of `uvnote`.
 
-If you're a `vscode` user, you can use the `uvnote-preview` extension to preview your uvnote files directly in VSCode.
+```markdown
+---
+title: My Note
+author: you
+theme: dark | light
+syntax_theme: monokai
+ui_theme: default | monocolor
+show_line_numbers: true | false
+---
+```
 
-https://github.com/drbh/uvnote-preview
+### Code block options
+
+You can specify some options in the code block header to customize the behavior of each code block.
+
+```markdown
+\`\`\`python id=unique_id deps=numpy,pandas collapse-code=true
+# your code here
+\`\`\`
+```
+
+- `id`: A unique identifier for the code block. If not provided, a hash of the code will be used.
+- `deps`: A comma-separated list of dependencies to install for the code block. These will
+- `depends`: A comma-separated list of other code block ids that this code block depends on. This will ensure that the dependent code blocks are run before this one.
+- `collapse-code`: If true, the code block will be collapsed by default in the rendered HTML.
+- `collapse-output`: If true, the output of the code block will be collapsed by default in the rendered HTML.
 
 
-https://github.com/user-attachments/assets/59a470e2-c3f6-46b7-b3ad-b4a0085b8dda
+## Experimental features
 
-
+We support a `serve` command that will watch the markdown file for changes and automatically rebuild and serve the HTML file with live reloading. This works in most cases but can be a bit buggy when cell execution takes a long time and cannot be easily cancelled.
