@@ -53,6 +53,8 @@ uvx uvnote init --name mynote.md
 # Created mynote.md
 ```
 
+### Compile the uvnote file to HTML
+
 ```bash
 uvx uvnote build mynote.md
 # Found 1 code cells
