@@ -38,10 +38,58 @@ okay, so the core concept is simple (embed uv scripts in markdown), but there ar
 
 Currently, the recommended way to use `uvnote` is to directly run the script from GitHub using `uvx`, this will download and run the latest version of `uvnote` without needing to install anything until we have a proper release.
 
+
+### Check version
+
 ```bash
-uvx uvnote
-# Latest version
-# uvx https://github.com/drbh/uvnote.git
+uvx uvnote --version
+# uvnote, version 0.2.0
+```
+
+### Create a new uvnote file
+
+```bash
+uvx uvnote init --name mynote.md
+# Created mynote.md
+```
+
+```bash
+uvx uvnote build mynote.md
+# Found 1 code cells
+# 13:21:10 - INFO - dependency_graph:
+# 13:21:10 - INFO -   roots=1eb8d5a3
+# 13:21:10 - INFO -
+# 13:21:10 - INFO - execution_plan:
+# 13:21:10 - INFO -   cells=1
+# 13:21:10 - INFO -   order=1eb8d5a3
+# 13:21:10 - INFO -
+# 13:21:10 - INFO - progress=1/1
+# 13:21:10 - INFO - cell=1eb8d5a3
+# 13:21:10 - INFO -   cache=miss
+# 13:21:10 - INFO -   script=.uvnote/cells/1eb8d5a3.py
+# 13:21:10 - INFO -   command=uv_run script=1eb8d5a3.py
+# 13:21:10 - INFO -   duration=0.06s
+# 13:21:10 - INFO -   status=success
+# 13:21:10 - INFO -   result=success
+# 13:21:10 - INFO - execution_summary:
+# 13:21:10 - INFO -   success=1/1
+# 13:21:10 - INFO -   duration=0.06s
+# 13:21:10 - INFO -   status=complete
+# Generated: site/mynote.html
+# Copied cell files to: site/cells
+```
+
+### Open the generated HTML file
+
+```bash
+open site/mynote.html
+```
+
+
+## Commands
+
+```bash
+uvx uvnote --help
 ```
 
 outputs
