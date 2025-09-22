@@ -6,7 +6,7 @@
 <img width="2164" height="1392" alt="uvnotescreen" src="https://github.com/user-attachments/assets/5571a2a0-d849-4078-8395-436943d93082" />
 
 
-`uvnote` is a "Stateless, deterministic notebooks with uv and Markdown."
+`uvnote` is a computational document system that allows you to create reproducible, shareable, and interactive documents using plain Markdown and [uv/PEP 723](https://docs.astral.sh/uv/guides/scripts/#running-scripts) scripts.
 
 In other words, its a alternative for Jupyter notebooks that is more lightweight, more reproducible, and more portable.
 
