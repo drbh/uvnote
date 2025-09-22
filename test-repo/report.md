@@ -162,13 +162,14 @@ print("Summary saved to summary.txt")
 
 ## Results
 
-The analysis generated:
-- Statistical summaries of the random data
-- Visualizations showing data distribution and relationships  
-- CSV export of the raw data
-- Text summary of key findings
+The analysis generated:  
 
-All outputs are cached and artifacts are preserved in the generated HTML.
+- Statistical summaries of the random data  
+- Visualizations showing data distribution and relationships  
+- CSV export of the raw data  
+- Text summary of key findings  
+
+All outputs are cached and artifacts are preserved in the generated HTML.  
 
 ## Dependent Cell Example
 
