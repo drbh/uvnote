@@ -1,6 +1,6 @@
 [project]
 name = "uvnote"
-version = "0.2.0"
+version = "0.3.1"
 description = "Stateless, deterministic notebooks with uv and Markdown"
 readme = "README.md"
 requires-python = ">=3.10"

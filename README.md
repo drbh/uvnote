@@ -1,5 +1,7 @@
 # uvnote
 
+![PyPI - Version](https://img.shields.io/pypi/v/uvnote)
+
 > [!NOTE]
 > uvnote is pre v1, so things are subject to change
 
@@ -43,7 +45,7 @@ Currently, the recommended way to use `uvnote` is to directly run the script fro
 
 ```bash
 uvx uvnote --version
-# uvnote, version 0.2.0
+# uvnote, version 0.3.1
 ```
 
 ### Create a new uvnote file
