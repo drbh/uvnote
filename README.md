@@ -1,6 +1,6 @@
 # uvnote
 
-![PyPI - Version](https://img.shields.io/pypi/v/uvnote)
+[![PyPI - Version](https://img.shields.io/pypi/v/uvnote)](https://pypi.org/project/uvnote/)
 
 > [!NOTE]
 > uvnote is pre v1, so things are subject to change
