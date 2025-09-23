@@ -1096,6 +1096,8 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
     def emit_loading_state():
         """Generate and emit immediate loading HTML when file changes."""
         try:
+            import json
+
             logger = get_logger("cli")
             logger.info("Generating immediate loading state")
 
@@ -1105,26 +1107,73 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
             config, cells = parse_markdown(content)
             validate_cells(cells)
 
-            # Create loading placeholders for all cells
-            from .executor import ExecutionResult
+            # Check staleness of all cells
+            from .executor import ExecutionResult, check_all_cells_staleness
+
+            work_dir = resolved_file.parent
+            staleness = check_all_cells_staleness(cells, work_dir)
 
             loading_results = []
             for cell in cells:
-                loading_result = ExecutionResult(
-                    cell_id=cell.id,
-                    success=True,
-                    stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
-                    stderr="",
-                    duration=0.0,
-                    artifacts=[],
-                    cache_key="loading",
-                    is_html=True,
-                )
-                loading_results.append(loading_result)
-                logger.info(f"  {cell.id}=loading (file_changed)")
+                status = staleness["cell_status"][cell.id]
+                if status["stale"] or no_cache:
+                    # Create loading placeholder for stale cells
+                    loading_result = ExecutionResult(
+                        cell_id=cell.id,
+                        success=True,
+                        stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                        stderr="",
+                        duration=0.0,
+                        artifacts=[],
+                        cache_key="loading",
+                        is_html=True,
+                    )
+                    loading_results.append(loading_result)
+                    reason = "no_cache" if no_cache else status["reason"]
+                    logger.info(f"  {cell.id}=loading ({reason})")
+                else:
+                    # Load cached result for non-stale cells
+                    cache_key = status["cache_key"]
+                    cache_dir = work_dir / ".uvnote" / "cache" / cache_key
+                    try:
+                        with open(cache_dir / "result.json") as rf:
+                            cached = json.load(rf)
+                        artifacts = []
+                        if cache_dir.exists():
+                            for item in cache_dir.iterdir():
+                                if item.name not in {
+                                    "result.json",
+                                    "stdout.txt",
+                                    "stderr.txt",
+                                }:
+                                    artifacts.append(str(item.relative_to(cache_dir)))
+                        res = ExecutionResult(
+                            cell_id=cell.id,
+                            success=cached.get("success", True),
+                            stdout=cached.get("stdout", ""),
+                            stderr=cached.get("stderr", ""),
+                            duration=cached.get("duration", 0.0),
+                            artifacts=artifacts,
+                            cache_key=cache_key,
+                        )
+                        loading_results.append(res)
+                        logger.info(f"  {cell.id}=cached")
+                    except Exception as e:
+                        # Fall back to loading placeholder if cache read fails
+                        loading_result = ExecutionResult(
+                            cell_id=cell.id,
+                            success=True,
+                            stdout='<div class="loading-spinner"></div><div class="loading-skeleton"></div>',
+                            stderr="",
+                            duration=0.0,
+                            artifacts=[],
+                            cache_key="loading",
+                            is_html=True,
+                        )
+                        loading_results.append(loading_result)
+                        logger.info(f"  {cell.id}=loading (cache_error: {e})")
 
             # Generate and emit loading HTML
-            work_dir = resolved_file.parent
             generate_html(
                 content, config, cells, loading_results, output_file, work_dir
             )
