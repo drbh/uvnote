@@ -388,13 +388,16 @@ def execute_cell(
                 for fn in files:
                     before_set.add(str(Path(root) / fn))
 
+            # Use cell's custom timeout or default to 5 minutes (300 seconds)
+            timeout_seconds = cell.timeout if cell.timeout is not None else 300
+
             result = subprocess.run(
                 ["uv", "run", str(absolute_script_path)],
                 cwd=tmp_path,
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=300,  # 5 minute timeout
+                timeout=timeout_seconds,
             )
 
             success = result.returncode == 0
@@ -445,10 +448,11 @@ def execute_cell(
                     pass
 
     except subprocess.TimeoutExpired:
-        logger.error(f"  error=timeout duration=300s")
+        timeout_seconds = cell.timeout if cell.timeout is not None else 300
+        logger.error(f"  error=timeout duration={timeout_seconds}s")
         success = False
         stdout = ""
-        stderr = "Execution timed out after 300 seconds"
+        stderr = f"Execution timed out after {timeout_seconds} seconds"
         copied_rel = []
     except Exception as e:
         logger.error(f"  error={e}")

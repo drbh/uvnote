@@ -152,6 +152,7 @@ def build_directory(
     rerun: bool,
     dependencies: bool,
     incremental: bool,
+    rerun_path: tuple,
 ) -> int:
     """Build all markdown files in a directory recursively."""
 
@@ -170,6 +171,11 @@ def build_directory(
 
     click.echo(f"Found {len(md_files)} markdown files to build")
 
+    # Parse rerun paths if provided
+    rerun_paths = list(rerun_path) if rerun_path else []
+    if rerun_paths:
+        click.echo(f"Selective rerun enabled for paths: {', '.join(rerun_paths)}")
+
     # Track directory structure for index generation
     dir_structure = {}
 
@@ -179,12 +185,29 @@ def build_directory(
         # Calculate relative path from input directory
         relative_path = md_file.relative_to(input_path)
 
+        # Check if this file should be rerun based on path matching
+        file_should_rerun = rerun
+        if rerun_paths and not rerun:
+            # Check if this file matches any of the rerun paths
+            relative_str = str(relative_path)
+            for rpath in rerun_paths:
+                # Support both exact file matches and directory prefix matches
+                if (relative_str == rpath or
+                    relative_str.startswith(rpath + "/") or
+                    str(relative_path.parent).startswith(rpath) or
+                    rpath in str(relative_path.parent).split("/")):
+                    file_should_rerun = True
+                    break
+
         # Create corresponding output directory structure
         output_subdir = output / relative_path.parent
         output_subdir.mkdir(parents=True, exist_ok=True)
 
         # Build the file
-        click.echo(f"\nBuilding: {relative_path}")
+        if file_should_rerun and not rerun:
+            click.echo(f"\nBuilding (rerun): {relative_path}")
+        else:
+            click.echo(f"\nBuilding: {relative_path}")
 
         # Track for index generation
         parent_dir = str(relative_path.parent)
@@ -219,7 +242,7 @@ def build_directory(
             results = execute_cells(
                 cells,
                 work_dir,
-                use_cache=not (no_cache or rerun),
+                use_cache=not (no_cache or file_should_rerun),
                 force_rerun_cells=force_rerun_cells,
                 incremental_callback=None if not incremental else lambda r: None,  # Simplified for directory builds
             )
@@ -365,6 +388,11 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 @click.option(
     "--recursive", is_flag=True, help="Recursively build all .md files in directory"
 )
+@click.option(
+    "--rerun-path",
+    multiple=True,
+    help="Force rerun for files in specific path(s) only (can be used multiple times)",
+)
 def build(
     file: str,
     output: Optional[Path],
@@ -373,6 +401,7 @@ def build(
     dependencies: bool,
     incremental: bool,
     recursive: bool,
+    rerun_path: tuple,
 ):
     """Build static HTML from markdown file or directory."""
 
@@ -381,7 +410,7 @@ def build(
 
     if input_path.is_dir() or recursive:
         # Handle directory build
-        return build_directory(input_path, output, no_cache, rerun, dependencies, incremental)
+        return build_directory(input_path, output, no_cache, rerun, dependencies, incremental, rerun_path)
 
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)

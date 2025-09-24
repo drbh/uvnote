@@ -38,6 +38,7 @@ class CodeCell:
     collapse_code: bool = False
     collapse_output: bool = False
     commented: bool = False
+    timeout: Optional[int] = None  # Custom timeout in seconds
 
 
 def parse_attributes(info_string: str) -> Dict[str, str]:
@@ -209,6 +210,15 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                     collapse_code = collapsed_value
                     collapse_output = collapsed_value
 
+                # Parse timeout attribute (in seconds)
+                timeout = None
+                if "timeout" in attrs:
+                    try:
+                        timeout = int(attrs["timeout"])
+                    except (ValueError, TypeError):
+                        # Invalid timeout value, use default
+                        pass
+
                 cell = CodeCell(
                     id=cell_id,
                     code=code,
@@ -220,6 +230,7 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                     collapse_code=collapse_code,
                     collapse_output=collapse_output,
                     commented=commented,
+                    timeout=timeout,
                 )
                 cells.append(cell)
 
