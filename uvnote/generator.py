@@ -1,11 +1,12 @@
 """Static HTML output generator."""
 
+from __future__ import annotations
 import html
 import os
 import platform
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import markdown
 from jinja2 import Environment, BaseLoader, FileSystemLoader, TemplateNotFound
@@ -62,7 +63,7 @@ def highlight_code(code: str, config: DocumentConfig) -> str:
     return highlight(code, lexer, formatter)
 
 
-def split_uv_install_logs(stderr: str) -> tuple[str, str]:
+def split_uv_install_logs(stderr: str) -> Tuple[str, str]:
     """Split stderr into UV install logs and regular stderr.
 
     Returns:

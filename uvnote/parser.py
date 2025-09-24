@@ -1,10 +1,11 @@
 """Markdown parser for Python code blocks with attributes."""
 
+from __future__ import annotations
 import hashlib
 import re
 import yaml
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 
 @dataclass
@@ -69,7 +70,7 @@ def generate_cell_id(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()[:8]
 
 
-def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
+def parse_frontmatter(content: str) -> Tuple[DocumentConfig, str]:
     """Parse YAML frontmatter and return config + remaining content."""
     lines = content.splitlines()
 
@@ -124,7 +125,7 @@ def parse_frontmatter(content: str) -> tuple[DocumentConfig, str]:
     return config, remaining_content
 
 
-def parse_markdown(content: str) -> tuple[DocumentConfig, List[CodeCell]]:
+def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
     """Parse markdown content and extract config + Python code cells."""
     config, markdown_content = parse_frontmatter(content)
 

@@ -1,11 +1,12 @@
 """CLI commands for uvnote."""
 
+from __future__ import annotations
 import shutil
 import tempfile
 import time
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Union
 
 import click
 from watchdog.events import FileSystemEventHandler
@@ -144,6 +145,205 @@ print("Hello, uvnote!")
         return 1
 
 
+def build_directory(
+    input_path: Path,
+    output: Optional[Path],
+    no_cache: bool,
+    rerun: bool,
+    dependencies: bool,
+    incremental: bool,
+) -> int:
+    """Build all markdown files in a directory recursively."""
+
+    if output is None:
+        output = Path("site")
+
+    # Ensure output directory exists
+    output.mkdir(parents=True, exist_ok=True)
+
+    # Find all markdown files recursively
+    md_files = list(input_path.glob("**/*.md"))
+
+    if not md_files:
+        click.echo(f"No markdown files found in {input_path}")
+        return 1
+
+    click.echo(f"Found {len(md_files)} markdown files to build")
+
+    # Track directory structure for index generation
+    dir_structure = {}
+
+    # Build each markdown file
+    errors = []
+    for md_file in md_files:
+        # Calculate relative path from input directory
+        relative_path = md_file.relative_to(input_path)
+
+        # Create corresponding output directory structure
+        output_subdir = output / relative_path.parent
+        output_subdir.mkdir(parents=True, exist_ok=True)
+
+        # Build the file
+        click.echo(f"\nBuilding: {relative_path}")
+
+        # Track for index generation
+        parent_dir = str(relative_path.parent)
+        if parent_dir not in dir_structure:
+            dir_structure[parent_dir] = []
+        dir_structure[parent_dir].append(relative_path.stem + ".html")
+
+        try:
+            # Read markdown file
+            with open(md_file) as f:
+                content = f.read()
+
+            # Parse cells
+            config, cells = parse_markdown(content)
+            validate_cells(cells)
+
+            if not cells:
+                click.echo(f"  Skipping {relative_path}: No Python code cells found")
+                continue
+
+            click.echo(f"  Found {len(cells)} code cells")
+
+            # Execute cells
+            work_dir = md_file.parent
+
+            # Calculate dependencies if needed
+            force_rerun_cells = None
+            if dependencies:
+                all_cell_ids = {cell.id for cell in cells}
+                force_rerun_cells = all_cell_ids
+
+            results = execute_cells(
+                cells,
+                work_dir,
+                use_cache=not (no_cache or rerun),
+                force_rerun_cells=force_rerun_cells,
+                incremental_callback=None if not incremental else lambda r: None,  # Simplified for directory builds
+            )
+
+            # Check for failures
+            failed_cells = [r for r in results if not r.success]
+            if failed_cells:
+                click.echo(f"  Warning: {len(failed_cells)} cells failed")
+                for result in failed_cells:
+                    errors.append(f"{relative_path} - {result.cell_id}")
+
+            # Generate HTML
+            output_file = output_subdir / f"{md_file.stem}.html"
+            generate_html(content, config, cells, results, output_file, work_dir)
+            click.echo(f"  Generated: {output_file}")
+
+            # Copy cell files
+            cells_src = work_dir / ".uvnote" / "cells"
+            cells_dst = output_subdir / "cells"
+
+            if cells_src.exists():
+                if cells_dst.exists():
+                    shutil.rmtree(cells_dst)
+                shutil.copytree(cells_src, cells_dst)
+
+        except Exception as e:
+            click.echo(f"  Error building {relative_path}: {e}", err=True)
+            errors.append(str(relative_path))
+
+    # Generate index files for each directory
+    click.echo("\nGenerating directory index files...")
+    generate_directory_indexes(input_path, output, md_files)
+
+    # Report summary
+    click.echo(f"\n{'='*60}")
+    click.echo(f"Build complete: {len(md_files) - len(errors)} succeeded, {len(errors)} failed")
+
+    if errors:
+        click.echo("\nFailed files:")
+        for error in errors:
+            click.echo(f"  - {error}")
+        return 1
+
+    return 0
+
+
+def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Path]):
+    """Generate index.html files for directory navigation."""
+
+    # Group files by directory
+    dir_contents = {}
+
+    for md_file in md_files:
+        relative_path = md_file.relative_to(input_path)
+        parent_dir = relative_path.parent
+
+        # Track this file in its parent directory
+        parent_key = str(parent_dir) if str(parent_dir) != "." else ""
+        if parent_key not in dir_contents:
+            dir_contents[parent_key] = {"files": [], "subdirs": set()}
+        dir_contents[parent_key]["files"].append(relative_path.stem + ".html")
+
+        # Track subdirectories
+        parts = relative_path.parts
+        for i in range(len(parts) - 1):
+            current_dir = "/".join(parts[:i]) if i > 0 else ""
+            subdir = parts[i]
+            if current_dir not in dir_contents:
+                dir_contents[current_dir] = {"files": [], "subdirs": set()}
+            dir_contents[current_dir]["subdirs"].add(subdir)
+
+    # Generate index.html for each directory
+    for dir_path, contents in dir_contents.items():
+        output_dir = output / dir_path if dir_path else output
+        index_file = output_dir / "index.html"
+
+        # Build HTML content
+        html_lines = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            "  <meta charset='UTF-8'>",
+            "  <title>Directory Index</title>",
+            "  <style>",
+            "    body { font-family: monospace; margin: 20px; }",
+            "    h1 { font-size: 1.5em; }",
+            "    ul { list-style-type: none; padding-left: 20px; }",
+            "    li { margin: 5px 0; }",
+            "    .dir { font-weight: bold; }",
+            "    .file { color: #0066cc; }",
+            "    a { text-decoration: none; }",
+            "    a:hover { text-decoration: underline; }",
+            "  </style>",
+            "</head>",
+            "<body>",
+            f"  <h1>Index of /{dir_path}</h1>",
+            "  <ul>",
+        ]
+
+        # Add parent directory link if not at root
+        if dir_path:
+            parent_path = str(Path(dir_path).parent) if Path(dir_path).parent != Path(".") else ""
+            parent_link = "../index.html"
+            html_lines.append(f"    <li><a href='{parent_link}' class='dir'>../</a></li>")
+
+        # Add subdirectories
+        for subdir in sorted(contents["subdirs"]):
+            html_lines.append(f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>")
+
+        # Add files
+        for file in sorted(contents["files"]):
+            html_lines.append(f"    <li><a href='{file}' class='file'>{file}</a></li>")
+
+        html_lines.extend([
+            "  </ul>",
+            "</body>",
+            "</html>",
+        ])
+
+        # Write index file
+        index_file.write_text("\n".join(html_lines))
+        click.echo(f"  Created index: {index_file}")
+
+
 @main.command()
 @click.argument("file")
 @click.option(
@@ -162,6 +362,9 @@ print("Hello, uvnote!")
 @click.option(
     "--incremental", is_flag=True, help="Update HTML after each cell execution"
 )
+@click.option(
+    "--recursive", is_flag=True, help="Recursively build all .md files in directory"
+)
 def build(
     file: str,
     output: Optional[Path],
@@ -169,8 +372,16 @@ def build(
     rerun: bool,
     dependencies: bool,
     incremental: bool,
+    recursive: bool,
 ):
-    """Build static HTML from markdown file."""
+    """Build static HTML from markdown file or directory."""
+
+    # Check if input is a directory for recursive build
+    input_path = Path(file)
+
+    if input_path.is_dir() or recursive:
+        # Handle directory build
+        return build_directory(input_path, output, no_cache, rerun, dependencies, incremental)
 
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
@@ -869,12 +1080,12 @@ def clean(all: bool):
 
 @main.command("cache-prune")
 @click.option("--size", help="Target size cap like 5GB, 500MB. Defaults to env/10GB.")
-def cache_prune(size: str | None):
+def cache_prune(size: Optional[str]):
     """Prune cache to target size using LRU eviction."""
     work_dir = Path.cwd()
     init_db(work_dir)
 
-    def parse_size(s: str | None, default_bytes: int) -> int:
+    def parse_size(s: Optional[str], default_bytes: int) -> int:
         if not s:
             return default_bytes
         val = s.strip().lower()
