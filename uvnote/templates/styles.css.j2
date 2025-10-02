@@ -69,10 +69,12 @@
         :root[data-ui="monocolor"] a { color: var(--mono-color); }
         :root[data-ui="monocolor"] .menu-button,
         :root[data-ui="monocolor"] .theme-toggle,
-        :root[data-ui="monocolor"] .reset-toggle { background: var(--bg-primary); color: var(--mono-color); border-color: var(--mono-color); }
+        :root[data-ui="monocolor"] .reset-toggle,
+        :root[data-ui="monocolor"] .back-button { background: var(--bg-primary); color: var(--mono-color); border-color: var(--mono-color); }
         :root[data-ui="monocolor"] .menu-button:hover,
         :root[data-ui="monocolor"] .theme-toggle:hover,
-        :root[data-ui="monocolor"] .reset-toggle:hover { background: var(--bg-primary); color: var(--mono-color); border-color: var(--mono-color); }
+        :root[data-ui="monocolor"] .reset-toggle:hover,
+        :root[data-ui="monocolor"] .back-button:hover { background: var(--bg-primary); color: var(--mono-color); border-color: var(--mono-color); }
         :root[data-ui="monocolor"] .menu-dropdown { background: var(--bg-primary); border-color: var(--mono-color); box-shadow: none; }
         :root[data-ui="monocolor"] .menu-item { color: var(--mono-color); border-bottom-color: var(--mono-color); }
         :root[data-ui="monocolor"] .system-info { background: var(--bg-primary); border-color: var(--mono-color); }
@@ -182,7 +184,8 @@
         /* Keep default control styling when widgets are enabled, even in minimal UI */
         :root[data-ui="none"][data-widgets="on"] .menu-button,
         :root[data-ui="none"][data-widgets="on"] .theme-toggle,
-        :root[data-ui="none"][data-widgets="on"] .reset-toggle {
+        :root[data-ui="none"][data-widgets="on"] .reset-toggle,
+        :root[data-ui="none"][data-widgets="on"] .back-button {
             background: #f6f6f6;
             border: 1px solid #cccccc;
             color: #222222;
@@ -212,7 +215,8 @@
         :root[data-ui="none"][data-widgets="on"] .status-widget { background: #f6f6f6; border-color: #ccc; color: #222; }
         :root[data-ui="none"][data-widgets="on"] .menu-button:hover,
         :root[data-ui="none"][data-widgets="on"] .theme-toggle:hover,
-        :root[data-ui="none"][data-widgets="on"] .reset-toggle:hover {
+        :root[data-ui="none"][data-widgets="on"] .reset-toggle:hover,
+        :root[data-ui="none"][data-widgets="on"] .back-button:hover {
             background: #ededed;
             border-color: #bbbbbb;
             color: #000000;
@@ -270,7 +274,8 @@
         }
         
         .theme-toggle,
-        .reset-toggle {
+        .reset-toggle,
+        .back-button {
             background: var(--bg-secondary);
             border: 1px solid var(--border-primary);
             padding: 8px 12px;
@@ -281,9 +286,15 @@
             font-size: 0.9rem;
             user-select: none;
         }
-        
+
+        .back-button {
+            text-decoration: none;
+            display: inline-block;
+        }
+
         .theme-toggle:hover,
-        .reset-toggle:hover {
+        .reset-toggle:hover,
+        .back-button:hover {
             color: var(--text-primary);
             background: var(--bg-tertiary);
         }

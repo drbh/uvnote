@@ -5,6 +5,9 @@
 <body>
     <div class="controls">
         <div class="controls-buttons">
+            {% if parent_dir %}
+            <a href="{{ parent_dir }}" class="back-button">← back</a>
+            {% endif %}
             <div class="theme-toggle" onclick="toggleTheme()">light</div>
             <div class="reset-toggle" onclick="resetLayout()">reset</div>
             <div class="menu-button" onclick="toggleMenu()">

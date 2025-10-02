@@ -372,8 +372,13 @@ def generate_html(
     results: List[ExecutionResult],
     output_path: Path,
     work_dir: Path,
+    parent_dir: Optional[str] = None,
 ) -> None:
-    """Generate static HTML from markdown content and execution results."""
+    """Generate static HTML from markdown content and execution results.
+
+    Args:
+        parent_dir: Relative path to parent directory for back button (e.g., "../")
+    """
 
     # Extract content without frontmatter for processing
     from .parser import parse_frontmatter
@@ -462,6 +467,7 @@ def generate_html(
         content=content_html,
         pygments_css=pygments_css,
         system_info=system_info,
+        parent_dir=parent_dir,
     )
 
     # Ensure output directory exists

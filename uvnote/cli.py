@@ -456,7 +456,10 @@ def build_directory(
 
             # Generate HTML
             output_file = output_subdir / f"{md_file.stem}.html"
-            generate_html(content, config, cells, results, output_file, work_dir)
+            # Calculate parent directory path (for back button)
+            # Back button always goes to index.html in same directory
+            parent_dir = "index.html"
+            generate_html(content, config, cells, results, output_file, work_dir, parent_dir=parent_dir)
             click.echo(f"  Generated: {output_file}")
 
             # Copy cell files
@@ -519,43 +522,115 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
         output_dir = output / dir_path if dir_path else output
         index_file = output_dir / "index.html"
 
-        # Build HTML content
+        # Determine if we should show back button (not at root)
+        has_parent = bool(dir_path)
+        parent_link = "../index.html" if has_parent else None
+
+        # Build file list items
+        file_items = []
+
+        # Add subdirectories
+        for subdir in sorted(contents["subdirs"]):
+            file_items.append(f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>")
+
+        # Add files
+        for file in sorted(contents["files"]):
+            file_items.append(f"    <li><a href='{file}' class='file'>{file}</a></li>")
+
+        # Build HTML content with back button in controls
         html_lines = [
             "<!DOCTYPE html>",
             "<html>",
             "<head>",
             "  <meta charset='UTF-8'>",
-            "  <title>Directory Index</title>",
+            "  <meta name='viewport' content='width=device-width, initial-scale=1.0'>",
+            f"  <title>Index of /{dir_path or ''}</title>",
             "  <style>",
-            "    body { font-family: monospace; margin: 20px; }",
-            "    h1 { font-size: 1.5em; }",
-            "    ul { list-style-type: none; padding-left: 20px; }",
-            "    li { margin: 5px 0; }",
-            "    .dir { font-weight: bold; }",
-            "    .file { color: #0066cc; }",
-            "    a { text-decoration: none; }",
-            "    a:hover { text-decoration: underline; }",
+            "    :root {",
+            "      --bg-primary: #0a0a0a;",
+            "      --bg-secondary: #121212;",
+            "      --bg-tertiary: #181818;",
+            "      --text-primary: #e0e0e0;",
+            "      --text-secondary: #888888;",
+            "      --text-link: #64b5f6;",
+            "      --border-primary: #2a2a2a;",
+            "    }",
+            "    body {",
+            "      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;",
+            "      background: var(--bg-primary);",
+            "      color: var(--text-primary);",
+            "      margin: 0;",
+            "      padding: 16px;",
+            "      max-width: 900px;",
+            "      margin: 0 auto;",
+            "    }",
+            "    .controls {",
+            "      display: flex;",
+            "      justify-content: flex-end;",
+            "      margin-bottom: 1rem;",
+            "    }",
+            "    .back-button {",
+            "      background: var(--bg-secondary);",
+            "      border: 1px solid var(--border-primary);",
+            "      padding: 8px 12px;",
+            "      border-radius: 4px;",
+            "      color: var(--text-secondary);",
+            "      cursor: pointer;",
+            "      font-size: 0.9rem;",
+            "      text-decoration: none;",
+            "      display: inline-block;",
+            "    }",
+            "    .back-button:hover {",
+            "      color: var(--text-primary);",
+            "      background: var(--bg-tertiary);",
+            "    }",
+            "    h1 {",
+            "      font-size: 1.5em;",
+            "      margin: 1rem 0;",
+            "      color: var(--text-primary);",
+            "      border-bottom: 1px solid var(--border-primary);",
+            "      padding-bottom: 0.5rem;",
+            "    }",
+            "    ul {",
+            "      list-style-type: none;",
+            "      padding: 0;",
+            "    }",
+            "    li {",
+            "      margin: 0;",
+            "      border-bottom: 1px solid var(--border-primary);",
+            "    }",
+            "    li:last-child {",
+            "      border-bottom: none;",
+            "    }",
+            "    a {",
+            "      display: block;",
+            "      padding: 0.75rem 0.5rem;",
+            "      text-decoration: none;",
+            "      color: var(--text-link);",
+            "      transition: background 0.2s ease;",
+            "    }",
+            "    a:hover {",
+            "      background: var(--bg-secondary);",
+            "    }",
+            "    .dir {",
+            "      font-weight: 500;",
+            "    }",
             "  </style>",
             "</head>",
             "<body>",
-            f"  <h1>Index of /{dir_path}</h1>",
-            "  <ul>",
         ]
 
-        # Add parent directory link if not at root
-        if dir_path:
-            parent_path = str(Path(dir_path).parent) if Path(dir_path).parent != Path(".") else ""
-            parent_link = "../index.html"
-            html_lines.append(f"    <li><a href='{parent_link}' class='dir'>../</a></li>")
+        # Add controls with back button if not at root
+        if has_parent:
+            html_lines.extend([
+                "  <div class='controls'>",
+                f"    <a href='{parent_link}' class='back-button'>← back</a>",
+                "  </div>",
+            ])
 
-        # Add subdirectories
-        for subdir in sorted(contents["subdirs"]):
-            html_lines.append(f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>")
-
-        # Add files
-        for file in sorted(contents["files"]):
-            html_lines.append(f"    <li><a href='{file}' class='file'>{file}</a></li>")
-
+        html_lines.append(f"  <h1>Index of /{dir_path or ''}</h1>")
+        html_lines.append("  <ul>")
+        html_lines.extend(file_items)
         html_lines.extend([
             "  </ul>",
             "</body>",
