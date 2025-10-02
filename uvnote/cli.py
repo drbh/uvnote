@@ -145,6 +145,105 @@ print("Hello, uvnote!")
         return 1
 
 
+def sanitize_env_key(s: str) -> str:
+    """Convert a string to a valid environment variable key."""
+    out = []
+    for ch in s:
+        if ch.isalnum():
+            out.append(ch.upper())
+        else:
+            out.append("_")
+    return "".join(out)
+
+
+def resolve_file_env_vars(
+    current_file: Path,
+    cell_file_deps: Dict,
+    built_files: Dict,
+    all_files_cells: Dict
+) -> Dict[str, str]:
+    """
+    Build environment variables for cross-file dependencies.
+
+    Creates env vars like:
+        UVNOTE_FILE_ALGEBRA_CELLX=/path/to/.uvnote/cache/<hash>/
+        UVNOTE_FILE_ALGEBRA=/path/to/manifest.json (for whole file deps)
+
+    Args:
+        current_file: Path to the file being built
+        cell_file_deps: Dict[cell_id -> List[FileDependency]]
+        built_files: Dict[Path -> List[ExecutionResult]]
+        all_files_cells: Dict[Path -> List[CodeCell]]
+
+    Returns:
+        Dict of environment variables to inject
+    """
+    import json
+    from .file_deps import FileDependency
+
+    env_vars = {}
+
+    for cell_id, deps in cell_file_deps.items():
+        for dep in deps:
+            # Check if dependency was built
+            if dep.file_path not in built_files:
+                raise RuntimeError(
+                    f"Dependency {dep.file_path.name} not built before "
+                    f"{current_file.name}. This indicates a build order error."
+                )
+
+            results = built_files[dep.file_path]
+
+            if dep.cell_id:
+                # Specific cell dependency
+                result = next(
+                    (r for r in results if r.cell_id == dep.cell_id),
+                    None
+                )
+                if not result:
+                    raise ValueError(
+                        f"Cell '{dep.cell_id}' not found in {dep.file_path.name}. "
+                        f"Referenced by {current_file.name}:{cell_id}"
+                    )
+
+                if not result.success:
+                    raise RuntimeError(
+                        f"Dependency cell {dep.file_path.name}:{dep.cell_id} failed. "
+                        f"Cannot build {current_file.name}:{cell_id}"
+                    )
+
+                # Create env var like UVNOTE_FILE_ALGEBRA_CELLX
+                # Point to the cache directory for that cell
+                cache_dir = dep.file_path.parent / ".uvnote" / "cache" / result.cache_key
+                key = (
+                    f"UVNOTE_FILE_"
+                    f"{sanitize_env_key(dep.file_path.stem)}_"
+                    f"{sanitize_env_key(dep.cell_id)}"
+                )
+                env_vars[key] = str(cache_dir.resolve())
+
+            else:
+                # Whole file dependency - create manifest
+                manifest = {}
+                for result in results:
+                    if result.success:
+                        cache_dir = dep.file_path.parent / ".uvnote" / "cache" / result.cache_key
+                        manifest[result.cell_id] = str(cache_dir.resolve())
+
+                # Write manifest to a temp location
+                manifest_dir = current_file.parent / ".uvnote" / "manifests"
+                manifest_dir.mkdir(parents=True, exist_ok=True)
+                manifest_path = manifest_dir / f"{dep.file_path.stem}_manifest.json"
+
+                with open(manifest_path, 'w') as f:
+                    json.dump(manifest, f, indent=2)
+
+                key = f"UVNOTE_FILE_{sanitize_env_key(dep.file_path.stem)}"
+                env_vars[key] = str(manifest_path.resolve())
+
+    return env_vars
+
+
 def build_directory(
     input_path: Path,
     output: Optional[Path],
@@ -176,12 +275,105 @@ def build_directory(
     if rerun_paths:
         click.echo(f"Selective rerun enabled for paths: {', '.join(rerun_paths)}")
 
+    # Phase 1: Parse all files and extract file dependencies
+    from .file_deps import (
+        resolve_file_dependencies,
+        build_file_dependency_graph,
+        topological_sort_files,
+        detect_cycles,
+        validate_cell_references,
+    )
+
+    file_infos = {}  # Path -> (config, cells, cell_file_deps)
+    all_files_cells = {}  # Path -> cells (for validation)
+
+    click.echo("\nPhase 1: Parsing files and resolving dependencies...")
+    for md_file in md_files:
+        try:
+            # Resolve to absolute path for consistent key usage
+            md_file_resolved = md_file.resolve()
+
+            with open(md_file) as f:
+                content = f.read()
+            config, cells = parse_markdown(content)
+            validate_cells(cells)
+
+            # Resolve file dependencies for this file
+            cell_file_deps = resolve_file_dependencies(md_file_resolved, cells, input_path)
+
+            file_infos[md_file_resolved] = (config, cells, cell_file_deps)
+            all_files_cells[md_file_resolved] = cells
+
+            if cell_file_deps:
+                dep_summary = []
+                for cell_id, deps in cell_file_deps.items():
+                    for dep in deps:
+                        dep_summary.append(f"{cell_id}->{dep.key}")
+                click.echo(f"  {md_file.name}: {', '.join(dep_summary)}")
+
+        except Exception as e:
+            click.echo(f"  Error parsing {md_file.name}: {e}", err=True)
+            return 1
+
+    # Phase 2: Validate cell references
+    click.echo("\nPhase 2: Validating cell references...")
+    for md_file, (config, cells, cell_file_deps) in file_infos.items():
+        try:
+            validate_cell_references(md_file, cell_file_deps, all_files_cells)
+        except ValueError as e:
+            click.echo(f"  Error: {e}", err=True)
+            return 1
+
+    # Phase 3: Build file dependency graph and check for cycles
+    click.echo("\nPhase 3: Building file dependency graph...")
+    file_graph = build_file_dependency_graph(
+        {path: (cells, deps) for path, (config, cells, deps) in file_infos.items()}
+    )
+
+    # Detect cycles
+    cycles = detect_cycles(file_graph)
+    if cycles:
+        click.echo("\nError: Circular file dependencies detected:", err=True)
+        for cycle in cycles:
+            cycle_str = " -> ".join([f.name for f in cycle])
+            click.echo(f"  {cycle_str}", err=True)
+        return 1
+
+    # Topological sort to get build order
+    file_order, cyclic_files = topological_sort_files(file_graph)
+
+    if cyclic_files:
+        click.echo("\nWarning: Some files involved in circular dependencies (skipping):")
+        for f in cyclic_files:
+            click.echo(f"  {f.name}")
+
+    # Show build order if there are dependencies
+    has_deps = any(deps for deps in file_graph.values())
+    if has_deps:
+        click.echo("\nFile dependency graph:")
+        roots = [f for f in file_order if not file_graph.get(f)]
+        if roots:
+            click.echo(f"  roots: {', '.join(f.name for f in roots)}")
+        for f in file_order:
+            if file_graph.get(f):
+                dep_names = ', '.join(d.name for d in file_graph[f])
+                click.echo(f"  {f.name} -> {dep_names}")
+
+    click.echo(f"\nBuild order: {' -> '.join(f.name for f in file_order)}\n")
+
     # Track directory structure for index generation
     dir_structure = {}
 
-    # Build each markdown file
+    # Phase 4: Build each markdown file in dependency order
     errors = []
-    for md_file in md_files:
+    built_files = {}  # Path -> List[ExecutionResult]
+
+    # Map back from resolved paths to original for display
+    resolved_to_original = {f.resolve(): f for f in md_files}
+
+    for md_file_resolved in file_order:
+        # Get original path for relative path calculation
+        md_file = resolved_to_original.get(md_file_resolved, md_file_resolved)
         # Calculate relative path from input directory
         relative_path = md_file.relative_to(input_path)
 
@@ -191,11 +383,12 @@ def build_directory(
             # Check if this file matches any of the rerun paths
             relative_str = str(relative_path)
             for rpath in rerun_paths:
-                # Support both exact file matches and directory prefix matches
-                if (relative_str == rpath or
-                    relative_str.startswith(rpath + "/") or
-                    str(relative_path.parent).startswith(rpath) or
-                    rpath in str(relative_path.parent).split("/")):
+                # Normalize rpath (remove trailing slash if present)
+                rpath_normalized = rpath.rstrip("/")
+
+                # Support both exact file matches and directory/subdirectory prefix matches
+                if (relative_str == rpath_normalized or
+                    relative_str.startswith(rpath_normalized + "/")):
                     file_should_rerun = True
                     break
 
@@ -216,13 +409,9 @@ def build_directory(
         dir_structure[parent_dir].append(relative_path.stem + ".html")
 
         try:
-            # Read markdown file
-            with open(md_file) as f:
-                content = f.read()
-
-            # Parse cells
-            config, cells = parse_markdown(content)
-            validate_cells(cells)
+            # Get pre-parsed file info using resolved path
+            config, cells, cell_file_deps = file_infos[md_file_resolved]
+            content = md_file.read_text()
 
             if not cells:
                 click.echo(f"  Skipping {relative_path}: No Python code cells found")
@@ -239,13 +428,24 @@ def build_directory(
                 all_cell_ids = {cell.id for cell in cells}
                 force_rerun_cells = all_cell_ids
 
+            # Build environment variables for file dependencies
+            file_env_vars = {}
+            if cell_file_deps:
+                file_env_vars = resolve_file_env_vars(
+                    md_file_resolved, cell_file_deps, built_files, all_files_cells
+                )
+
             results = execute_cells(
                 cells,
                 work_dir,
                 use_cache=not (no_cache or file_should_rerun),
+                env_vars=file_env_vars,  # Pass file dependency env vars
                 force_rerun_cells=force_rerun_cells,
                 incremental_callback=None if not incremental else lambda r: None,  # Simplified for directory builds
             )
+
+            # Store results for dependent files (use resolved path as key)
+            built_files[md_file_resolved] = results
 
             # Check for failures
             failed_cells = [r for r in results if not r.success]

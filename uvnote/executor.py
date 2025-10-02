@@ -230,6 +230,7 @@ def generate_cache_key(
     - cell code
     - declared deps
     - relevant env vars (dependency inputs)
+    - file dependencies (needs_files)
     - uv.lock hash (if present)
     - python version (major.minor.micro)
     """
@@ -249,10 +250,42 @@ def generate_cache_key(
     py_ver = (
         f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     )
+
+    # Include file dependencies in cache key
+    # For each file dependency, hash the file's content
+    # This ensures cache invalidation when dependency files change
+    file_dep_hashes = []
+    if cell.needs_files:
+        for file_ref in cell.needs_files:
+            # Parse file reference
+            if ':' in file_ref:
+                file_part = file_ref.split(':', 1)[0]
+            else:
+                file_part = file_ref
+
+            # Resolve path relative to work_dir
+            # Note: This assumes single-file execution context
+            # For directory builds, this will be handled by env_vars changes
+            try:
+                dep_path = (work_dir / file_part).resolve()
+                if dep_path.exists():
+                    h = hashlib.sha256()
+                    with open(dep_path, "rb") as f:
+                        for chunk in iter(lambda: f.read(65536), b""):
+                            h.update(chunk)
+                    file_dep_hashes.append(f"{file_part}:{h.hexdigest()[:16]}")
+                else:
+                    # File doesn't exist - include path as marker
+                    file_dep_hashes.append(f"{file_part}:missing")
+            except Exception:
+                # Error reading file - include as marker
+                file_dep_hashes.append(f"{file_part}:error")
+
     content = {
         "code": cell.code,
         "deps": sorted(cell.deps),
         "env": sorted((env_vars or {}).items()),
+        "file_deps": sorted(file_dep_hashes),
         "uv_lock": uv_lock_hash or "no-lock",
         "python": py_ver,
     }

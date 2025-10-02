@@ -32,7 +32,8 @@ class CodeCell:
     code: str
     deps: List[str]
     outputs: List[str]
-    needs: List[str]
+    needs: List[str]  # Local cell dependencies within same file
+    needs_files: List[str]  # Cross-file dependencies (e.g., "../math/algebra.md:cellX")
     line_start: int
     line_end: int
     collapse_code: bool = False
@@ -64,6 +65,50 @@ def parse_attributes(info_string: str) -> Dict[str, str]:
             attrs[key] = value
 
     return attrs
+
+
+def parse_cell_needs(needs_attr: str) -> Tuple[List[str], List[str]]:
+    """
+    Parse needs attribute into local cell dependencies and file dependencies.
+
+    Local dependencies are simple cell IDs within the same file.
+    File dependencies are paths with optional cell ID:
+      - "../math/algebra.md" - depend on entire file
+      - "../math/algebra.md:cellX" - depend on specific cell in file
+      - "math/algebra.md" - relative path
+      - "/absolute/path/file.md:cellId" - absolute path
+
+    Args:
+        needs_attr: Comma-separated list of dependencies
+
+    Returns:
+        Tuple of (local_cell_ids, file_references)
+
+    Examples:
+        "cellA,cellB" -> (["cellA", "cellB"], [])
+        "../math/algebra.md:cellX" -> ([], ["../math/algebra.md:cellX"])
+        "cellA,../math/algebra.md" -> (["cellA"], ["../math/algebra.md"])
+        "cellA,../math/algebra.md:cellX,cellB" -> (["cellA", "cellB"], ["../math/algebra.md:cellX"])
+    """
+    if not needs_attr:
+        return [], []
+
+    local = []
+    files = []
+
+    for need in needs_attr.split(','):
+        need = need.strip()
+        if not need:
+            continue
+
+        # Check if this looks like a file path
+        # File paths contain '/' or end with '.md'
+        if '/' in need or need.endswith('.md'):
+            files.append(need)
+        else:
+            local.append(need)
+
+    return local, files
 
 
 def generate_cell_id(code: str) -> str:
@@ -187,18 +232,16 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                 if "outputs" in attrs:
                     outputs = [out.strip() for out in attrs["outputs"].split(",")]
 
-                # Parse needs/depends (dependencies on other cells)
-                needs: list[str] = []
+                # Parse needs/depends (dependencies on other cells and files)
                 # Support both 'needs' and 'depends' as aliases
                 dep_attr = None
                 if "needs" in attrs:
                     dep_attr = attrs["needs"]
                 elif "depends" in attrs:
                     dep_attr = attrs["depends"]
-                if dep_attr:
-                    needs = [
-                        need.strip() for need in dep_attr.split(",") if need.strip()
-                    ]
+
+                # Separate local cell dependencies from file dependencies
+                needs, needs_files = parse_cell_needs(dep_attr or "")
 
                 # Parse collapse attributes
                 collapse_code = attrs.get("collapse-code", "").lower() == "true"
@@ -225,6 +268,7 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                     deps=deps,
                     outputs=outputs,
                     needs=needs,
+                    needs_files=needs_files,
                     line_start=line_start,
                     line_end=i,
                     collapse_code=collapse_code,
