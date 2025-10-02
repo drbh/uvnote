@@ -90,6 +90,83 @@ def split_uv_install_logs(stderr: str) -> Tuple[str, str]:
     return '\n'.join(uv_logs), '\n'.join(regular_logs).strip()
 
 
+def render_artifact_preview(artifact: str, cell_id: str, cache_dir: Path, cache_key: str) -> str:
+    """Render a single artifact preview as HTML."""
+    html_parts = []
+
+    if artifact.endswith((".png", ".jpg", ".jpeg")):
+        html_parts.append('<div class="artifact-preview">')
+        html_parts.append(
+            f'<img src="artifacts/{cell_id}/{artifact}" alt="{artifact}">'
+        )
+        html_parts.append("</div>")
+    elif artifact.endswith(".svg"):
+        # Read and embed SVG content directly
+        svg_path = cache_dir / cache_key / artifact
+        if svg_path.exists():
+            try:
+                svg_content = svg_path.read_text()
+                # Basic validation that it's an SVG
+                if "<svg" in svg_content and "</svg>" in svg_content:
+                    html_parts.append('<div class="artifact-preview">')
+                    html_parts.append(svg_content)
+                    html_parts.append("</div>")
+                else:
+                    # Fallback to img tag if not valid SVG
+                    html_parts.append('<div class="artifact-preview">')
+                    html_parts.append(
+                        f'<img src="artifacts/{cell_id}/{artifact}" alt="{artifact}">'
+                    )
+                    html_parts.append("</div>")
+            except Exception:
+                # Fallback to img tag on error
+                html_parts.append('<div class="artifact-preview">')
+                html_parts.append(
+                    f'<img src="artifacts/{cell_id}/{artifact}" alt="{artifact}">'
+                )
+                html_parts.append("</div>")
+    elif artifact.endswith(".csv"):
+        # Read and convert CSV to HTML table
+        csv_path = cache_dir / cache_key / artifact
+        if csv_path.exists():
+            try:
+                import csv
+                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    rows = list(reader)
+
+                if rows:
+                    html_parts.append('<div class="artifact-preview artifact-csv">')
+                    html_parts.append('<table class="csv-table">')
+
+                    # First row as header
+                    if len(rows) > 0:
+                        html_parts.append('<thead><tr>')
+                        for cell in rows[0]:
+                            html_parts.append(f'<th>{html.escape(cell)}</th>')
+                        html_parts.append('</tr></thead>')
+
+                    # Remaining rows as data
+                    if len(rows) > 1:
+                        html_parts.append('<tbody>')
+                        for row in rows[1:]:
+                            html_parts.append('<tr>')
+                            for cell in row:
+                                html_parts.append(f'<td>{html.escape(cell)}</td>')
+                            html_parts.append('</tr>')
+                        html_parts.append('</tbody>')
+
+                    html_parts.append('</table>')
+                    html_parts.append('</div>')
+            except Exception as e:
+                # Show error message if CSV parsing fails
+                html_parts.append('<div class="artifact-preview artifact-csv-error">')
+                html_parts.append(f'<p>Error rendering CSV: {html.escape(str(e))}</p>')
+                html_parts.append('</div>')
+
+    return "\n".join(html_parts)
+
+
 def render_cell(
     cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path, config: DocumentConfig
 ) -> str:
@@ -190,12 +267,32 @@ def render_cell(
         output_class += " collapsed"
     html_parts.append(f'<div id="output-{cell.id}" class="{output_class}">')
 
+    # Process stdout for inline artifact references
+    cache_dir = work_dir / ".uvnote" / "cache"
+    embedded_artifacts = set()
+
     if result.stdout:
+        stdout_content = result.stdout
+
+        # Find and replace inline artifact references: ![artifact:filename]
+        if result.artifacts:
+            import re
+            pattern = r'!\[artifact:([^\]]+)\]'
+
+            def replace_artifact_ref(match):
+                artifact_name = match.group(1)
+                if artifact_name in result.artifacts:
+                    embedded_artifacts.add(artifact_name)
+                    return render_artifact_preview(artifact_name, cell.id, cache_dir, result.cache_key)
+                return match.group(0)  # Keep original if artifact not found
+
+            stdout_content = re.sub(pattern, replace_artifact_ref, stdout_content)
+
         if getattr(result, "is_html", False):
-            html_parts.append(f'<div class="cell-stdout">{result.stdout}</div>')
+            html_parts.append(f'<div class="cell-stdout">{stdout_content}</div>')
         else:
             html_parts.append(
-                f'<div class="cell-stdout">{html.escape(result.stdout)}</div>'
+                f'<div class="cell-stdout">{html.escape(stdout_content)}</div>'
             )
 
     if result.stderr:
@@ -229,40 +326,12 @@ def render_cell(
                 f'<a href="artifacts/{cell.id}/{artifact}" class="artifact" target="_blank">{artifact}</a>'
             )
 
-        # Image previews
-        cache_dir = work_dir / ".uvnote" / "cache"
+        # Embed previews for artifacts not already embedded inline
         for artifact in result.artifacts:
-            if artifact.endswith((".png", ".jpg", ".jpeg")):
-                html_parts.append('<div class="artifact-preview">')
-                html_parts.append(
-                    f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
-                )
-                html_parts.append("</div>")
-            elif artifact.endswith(".svg"):
-                # Read and embed SVG content directly
-                svg_path = cache_dir / result.cache_key / artifact
-                if svg_path.exists():
-                    try:
-                        svg_content = svg_path.read_text()
-                        # Basic validation that it's an SVG
-                        if "<svg" in svg_content and "</svg>" in svg_content:
-                            html_parts.append('<div class="artifact-preview">')
-                            html_parts.append(svg_content)
-                            html_parts.append("</div>")
-                        else:
-                            # Fallback to img tag if not valid SVG
-                            html_parts.append('<div class="artifact-preview">')
-                            html_parts.append(
-                                f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
-                            )
-                            html_parts.append("</div>")
-                    except Exception:
-                        # Fallback to img tag on error
-                        html_parts.append('<div class="artifact-preview">')
-                        html_parts.append(
-                            f'<img src="artifacts/{cell.id}/{artifact}" alt="{artifact}">'
-                        )
-                        html_parts.append("</div>")
+            if artifact not in embedded_artifacts:
+                preview_html = render_artifact_preview(artifact, cell.id, cache_dir, result.cache_key)
+                if preview_html:
+                    html_parts.append(preview_html)
 
         html_parts.append("</div>")
 
@@ -270,6 +339,30 @@ def render_cell(
     html_parts.append("</div>")
 
     return "\n".join(html_parts)
+
+
+def process_inline_artifact_refs(content: str, results: List[ExecutionResult], work_dir: Path) -> str:
+    """Process inline artifact references in markdown content."""
+    import re
+
+    cache_dir = work_dir / ".uvnote" / "cache"
+
+    # Build mapping of artifact name to (cell_id, cache_key)
+    artifact_map = {}
+    for result in results:
+        if result.artifacts:
+            for artifact in result.artifacts:
+                artifact_map[artifact] = (result.cell_id, result.cache_key)
+
+    def replace_artifact_ref(match):
+        artifact_name = match.group(1)
+        if artifact_name in artifact_map:
+            cell_id, cache_key = artifact_map[artifact_name]
+            return render_artifact_preview(artifact_name, cell_id, cache_dir, cache_key)
+        return match.group(0)  # Keep original if artifact not found
+
+    pattern = r'!\[artifact:([^\]]+)\]'
+    return re.sub(pattern, replace_artifact_ref, content)
 
 
 def generate_html(
@@ -327,6 +420,10 @@ def generate_html(
 
     # Convert to HTML
     clean_content = "\n".join(new_lines)
+
+    # Process inline artifact references in markdown content
+    clean_content = process_inline_artifact_refs(clean_content, results, work_dir)
+
     content_html = md.convert(clean_content)
 
     # Setup Jinja2 environment

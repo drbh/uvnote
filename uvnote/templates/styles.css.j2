@@ -687,6 +687,41 @@
         .artifact-preview svg {
             background: transparent;
         }
+        /* CSV table styling */
+        .artifact-csv {
+            margin-top: 1rem;
+            overflow-x: auto;
+        }
+        .csv-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 1px;
+        }
+        .csv-table th,
+        .csv-table td {
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            border: 1px solid var(--border-primary);
+        }
+        .csv-table th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .csv-table tbody tr:hover {
+            background: var(--bg-artifact-hover);
+        }
+        .artifact-csv-error {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-error);
+            color: var(--text-error);
+            border: 1px solid var(--border-error);
+            border-radius: 1px;
+        }
         .cell-failed {
             border-color: var(--border-cell-failed);
         }
