@@ -1,4 +1,60 @@
-// Apply theme and widget visibility immediately to prevent flicker
+// Iframe-friendly navigation router
+        (function() {
+            const isIframe = window.self !== window.top;
+            if (!isIframe) return; // Only activate in iframe context
+
+            // On load: if hash points to a different page, navigate there
+            const hash = window.location.hash;
+            if (hash && hash.startsWith('#/')) {
+                const targetPath = hash.slice(2); // Remove '#/'
+                const currentPath = window.location.pathname.split('/').pop();
+
+                // Only navigate if we're not already on the target page
+                if (targetPath !== currentPath) {
+                    window.location.href = targetPath;
+                    return; // Stop execution, we're navigating away
+                }
+            }
+
+            // Intercept all link clicks for hash-based navigation
+            document.addEventListener('click', function(e) {
+                const link = e.target.closest('a');
+                if (!link) return;
+
+                const href = link.getAttribute('href');
+
+                // Skip external links, anchors, and javascript: links
+                if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('javascript:')) {
+                    return;
+                }
+
+                e.preventDefault();
+
+                // Convert relative/absolute path to hash-based navigation
+                const url = new URL(href, window.location.href);
+                let fullPath = url.pathname;
+
+                // Remove leading slash if present for cleaner paths
+                if (fullPath.startsWith('/')) {
+                    fullPath = fullPath.slice(1);
+                }
+
+                // Update parent URL hash
+                window.location.hash = '#/' + fullPath;
+
+                // For HTML files, navigate within iframe
+                if (fullPath.endsWith('.html') || fullPath.endsWith('/')) {
+                    const pathParts = fullPath.split('/').filter(p => p);
+                    const targetFile = pathParts[pathParts.length - 1] || 'index.html';
+                    window.location.href = targetFile;
+                } else {
+                    // For non-HTML files (raw .py, etc), open directly
+                    window.open(href, '_blank');
+                }
+            });
+        })();
+
+        // Apply theme and widget visibility immediately to prevent flicker
         (function() {
             const configTheme = '{{ config.theme }}';
             const hasConfigUi = {{ 'true' if config.ui_theme is not none else 'false' }};

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 import click
+import pathspec
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -19,6 +20,62 @@ from .server import Broadcaster, create_app
 from .cache import evict_to_target, get_cache_cap_bytes, get_total_size_bytes, init_db
 from .logging_config import setup_logging, get_logger
 from .rebuild_queue import RebuildQueueManager
+
+
+def load_gitignore(root_path: Path) -> Optional[pathspec.PathSpec]:
+    """
+    Load .gitignore file from root directory and return PathSpec.
+
+    Args:
+        root_path: Root directory to search for .gitignore
+
+    Returns:
+        PathSpec object if .gitignore exists, None otherwise
+    """
+    gitignore_path = root_path / ".gitignore"
+    if not gitignore_path.exists():
+        return None
+
+    try:
+        with open(gitignore_path, 'r') as f:
+            patterns = f.read().splitlines()
+        return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
+    except Exception:
+        return None
+
+
+def filter_files_by_gitignore(
+    files: List[Path],
+    root_path: Path,
+    spec: Optional[pathspec.PathSpec]
+) -> List[Path]:
+    """
+    Filter out files matching .gitignore patterns.
+
+    Args:
+        files: List of file paths to filter
+        root_path: Root directory (for calculating relative paths)
+        spec: PathSpec object from .gitignore
+
+    Returns:
+        Filtered list of files
+    """
+    if spec is None:
+        return files
+
+    filtered = []
+    for file in files:
+        try:
+            # Get path relative to root for matching
+            rel_path = file.relative_to(root_path)
+            # Check if file should be ignored
+            if not spec.match_file(str(rel_path)):
+                filtered.append(file)
+        except ValueError:
+            # File is not relative to root, include it
+            filtered.append(file)
+
+    return filtered
 
 
 def resolve_file_path(file_input: str) -> Path:
@@ -262,7 +319,16 @@ def build_directory(
     output.mkdir(parents=True, exist_ok=True)
 
     # Find all markdown files recursively
-    md_files = list(input_path.glob("**/*.md"))
+    all_md_files = list(input_path.glob("**/*.md"))
+
+    # Load .gitignore and filter files
+    gitignore_spec = load_gitignore(input_path)
+    md_files = filter_files_by_gitignore(all_md_files, input_path, gitignore_spec)
+
+    # Report filtering results
+    if gitignore_spec and len(md_files) < len(all_md_files):
+        ignored_count = len(all_md_files) - len(md_files)
+        click.echo(f"Filtered out {ignored_count} files based on .gitignore")
 
     if not md_files:
         click.echo(f"No markdown files found in {input_path}")
