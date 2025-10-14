@@ -2232,46 +2232,32 @@
         }
 
         function copyCell(cellId){
-            console.log('copyCell called with cellId:', cellId);
-            
             // Try multiple selectors to find the code element
-            let codeElement = document.querySelector('#code-'+cellId+' code');
+            // Pygments generates .highlight > pre with spans, not wrapped in <code>
+            let codeElement = document.querySelector('#code-'+cellId+' .highlight pre');
             if (!codeElement) {
-                codeElement = document.querySelector('#code-'+cellId+' pre code');
+                codeElement = document.querySelector('#code-'+cellId+' pre');
             }
             if (!codeElement) {
-                codeElement = document.querySelector('#code-'+cellId+' .highlight code');
+                codeElement = document.querySelector('#code-'+cellId+' code');
             }
             if (!codeElement) {
-                // Try finding any code element within the cell
-                const codeDiv = document.getElementById('code-'+cellId);
-                if (codeDiv) {
-                    codeElement = codeDiv.querySelector('code');
-                }
+                // Fallback to the code div itself
+                codeElement = document.getElementById('code-'+cellId);
             }
-            
+
             const btn = document.querySelector('.copy-btn[onclick*="'+cellId+'"]');
-            
-            console.log('Found codeElement:', codeElement);
-            console.log('Found btn:', btn);
-            console.log('Code div structure:', document.getElementById('code-'+cellId));
-            
+
             if (!codeElement) {
                 console.error('Code element not found for cell:', cellId);
-                // Log the actual structure for debugging
-                const codeDiv = document.getElementById('code-'+cellId);
-                if (codeDiv) {
-                    console.log('Code div HTML:', codeDiv.innerHTML);
-                }
                 return;
             }
             if (!btn) {
                 console.error('Copy button not found for cell:', cellId);
                 return;
             }
-            
+
             const codeText = codeElement.textContent;
-            console.log('Code text to copy:', codeText ? codeText.substring(0, 50) + '...' : 'empty');
             
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(codeText).then(function() {

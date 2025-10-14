@@ -525,7 +525,8 @@ def build_directory(
             # Calculate parent directory path (for back button)
             # Back button always goes to index.html in same directory
             parent_dir = "index.html"
-            generate_html(content, config, cells, results, output_file, work_dir, parent_dir=parent_dir)
+            # Pass relative path for GitHub button
+            generate_html(content, config, cells, results, output_file, work_dir, parent_dir=parent_dir, source_file=relative_path)
             click.echo(f"  Generated: {output_file}")
 
             # Copy cell files
@@ -905,7 +906,7 @@ def build(
                         mixed_results.append(placeholder)
 
                 generate_html(
-                    content, config, cells, mixed_results, output_file, work_dir
+                    content, config, cells, mixed_results, output_file, work_dir, source_file=Path(resolved_file.name)
                 )
                 logger.info(f"  incremental_update: {output_file}")
             except Exception as e:
@@ -915,7 +916,7 @@ def build(
 
         try:
             generate_html(
-                content, config, cells, initial_results, output_file, work_dir
+                content, config, cells, initial_results, output_file, work_dir, source_file=Path(resolved_file.name)
             )
             logger.info(f"  initial: {output_file}")
         except Exception as e:
@@ -946,7 +947,7 @@ def build(
     # Generate final HTML (only if not incremental, since incremental already generated it)
     if not incremental:
         try:
-            generate_html(content, config, cells, results, output_file, work_dir)
+            generate_html(content, config, cells, results, output_file, work_dir, source_file=Path(resolved_file.name))
             click.echo(f"Generated: {output_file}")
         except Exception as e:
             click.echo(f"Error generating HTML: {e}", err=True)
@@ -1319,7 +1320,7 @@ def build_loading(file: str, output: Optional[Path]):
     try:
         from .generator import generate_html
 
-        generate_html(content, config, cells, results, output_file, work_dir)
+        generate_html(content, config, cells, results, output_file, work_dir, source_file=Path(resolved_file.name))
         click.echo(f"Generated: {output_file}")
     except Exception as e:
         click.echo(f"Error generating HTML: {e}", err=True)

@@ -168,7 +168,7 @@ def render_artifact_preview(artifact: str, cell_id: str, cache_dir: Path, cache_
 
 
 def render_cell(
-    cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path, config: DocumentConfig
+    cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path, config: DocumentConfig, source_file: Optional[Path] = None
 ) -> str:
     """Render a single cell as HTML."""
     cell_class = "cell"
@@ -229,6 +229,24 @@ def render_cell(
     html_parts.append(
         f'<a href="cells/{cell.id}.py" target="_blank" class="raw-btn">Raw</a>'
     )
+
+    # Add GitHub button if on_github is configured and source_file is provided
+    if config.on_github and source_file:
+        # Construct GitHub URL: https://github.com/{repo}/blob/main/{path}
+        github_path = str(source_file).replace('\\', '/')  # Windows path compat
+        github_url = f'https://github.com/{config.on_github}/blob/main/{github_path}'
+        html_parts.append(
+            f'<a href="{github_url}" target="_blank" class="github-btn">GitHub</a>'
+        )
+
+    # Add Hugging Face button if on_huggingface is configured
+    if config.on_huggingface:
+        # Construct Hugging Face URL: https://huggingface.co/{kernel_path}
+        hf_url = f'https://huggingface.co/{config.on_huggingface}'
+        html_parts.append(
+            f'<a href="{hf_url}" target="_blank" class="hf-btn">🤗 HF</a>'
+        )
+
     html_parts.append("</div>")
 
     # Cell code - handle collapse state
@@ -373,11 +391,13 @@ def generate_html(
     output_path: Path,
     work_dir: Path,
     parent_dir: Optional[str] = None,
+    source_file: Optional[Path] = None,
 ) -> None:
     """Generate static HTML from markdown content and execution results.
 
     Args:
         parent_dir: Relative path to parent directory for back button (e.g., "../")
+        source_file: Relative path to the source markdown file (for GitHub links)
     """
 
     # Extract content without frontmatter for processing
@@ -409,7 +429,7 @@ def generate_html(
                     if result:
                         highlighted_code = highlight_code(cell.code, config)
                         cell_html = render_cell(
-                            cell, result, highlighted_code, work_dir, config
+                            cell, result, highlighted_code, work_dir, config, source_file
                         )
                         new_lines.append(cell_html)
                     cell_found = True

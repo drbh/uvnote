@@ -22,6 +22,8 @@ class DocumentConfig:
     collapse_code: bool = True
     custom_css: str = ""
     code_font_size: Optional[Any] = None  # CSS size token or number (px)
+    on_github: Optional[str] = None  # GitHub repo path (e.g., "huggingface/kernels-uvnotes")
+    on_huggingface: Optional[str] = None  # Hugging Face kernel path (e.g., "kernels-community/flash-attn2")
 
 
 @dataclass
@@ -164,6 +166,8 @@ def parse_frontmatter(content: str) -> Tuple[DocumentConfig, str]:
         collapse_code=frontmatter_data.get("collapse_code", False),
         custom_css=frontmatter_data.get("custom_css", ""),
         code_font_size=frontmatter_data.get("code_font_size"),
+        on_github=frontmatter_data.get("on_github"),
+        on_huggingface=frontmatter_data.get("on_huggingface"),
     )
 
     # Return remaining content
