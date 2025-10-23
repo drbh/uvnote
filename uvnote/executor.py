@@ -163,7 +163,7 @@ def check_all_cells_staleness(cells: List[CodeCell], work_dir: Path) -> dict:
                     # Use the cache key as a proxy for the cache directory
                     dep_key = executed[need]["cache_key"]
                     dep_dir = work_dir / ".uvnote" / "cache" / dep_key
-                    dep_dir = dep_dir.resolve() # make it absolute path
+                    dep_dir = dep_dir.resolve()  # make it absolute path
                     env_key = f"UVNOTE_INPUT_{sanitize_env_key(need)}"
                     per_cell_env[env_key] = str(dep_dir)
                     inputs_list.append(env_key)
@@ -231,6 +231,7 @@ def generate_cache_key(
     - declared deps
     - relevant env vars (dependency inputs)
     - file dependencies (needs_files)
+    - script file content (if script_file is specified)
     - uv.lock hash (if present)
     - python version (major.minor.micro)
     """
@@ -258,8 +259,8 @@ def generate_cache_key(
     if cell.needs_files:
         for file_ref in cell.needs_files:
             # Parse file reference
-            if ':' in file_ref:
-                file_part = file_ref.split(':', 1)[0]
+            if ":" in file_ref:
+                file_part = file_ref.split(":", 1)[0]
             else:
                 file_part = file_ref
 
@@ -281,11 +282,19 @@ def generate_cache_key(
                 # Error reading file - include as marker
                 file_dep_hashes.append(f"{file_part}:error")
 
+    # Include script file hash if script_file is specified
+    # The code is already loaded from the script file, but we include the path
+    # for clarity in debugging
+    script_file_marker = None
+    if cell.script_file:
+        script_file_marker = f"script:{cell.script_file}"
+
     content = {
         "code": cell.code,
         "deps": sorted(cell.deps),
         "env": sorted((env_vars or {}).items()),
         "file_deps": sorted(file_dep_hashes),
+        "script_file": script_file_marker,
         "uv_lock": uv_lock_hash or "no-lock",
         "python": py_ver,
     }

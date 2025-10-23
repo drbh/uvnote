@@ -37,17 +37,15 @@ def load_gitignore(root_path: Path) -> Optional[pathspec.PathSpec]:
         return None
 
     try:
-        with open(gitignore_path, 'r') as f:
+        with open(gitignore_path, "r") as f:
             patterns = f.read().splitlines()
-        return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
+        return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
     except Exception:
         return None
 
 
 def filter_files_by_gitignore(
-    files: List[Path],
-    root_path: Path,
-    spec: Optional[pathspec.PathSpec]
+    files: List[Path], root_path: Path, spec: Optional[pathspec.PathSpec]
 ) -> List[Path]:
     """
     Filter out files matching .gitignore patterns.
@@ -214,10 +212,7 @@ def sanitize_env_key(s: str) -> str:
 
 
 def resolve_file_env_vars(
-    current_file: Path,
-    cell_file_deps: Dict,
-    built_files: Dict,
-    all_files_cells: Dict
+    current_file: Path, cell_file_deps: Dict, built_files: Dict, all_files_cells: Dict
 ) -> Dict[str, str]:
     """
     Build environment variables for cross-file dependencies.
@@ -253,10 +248,7 @@ def resolve_file_env_vars(
 
             if dep.cell_id:
                 # Specific cell dependency
-                result = next(
-                    (r for r in results if r.cell_id == dep.cell_id),
-                    None
-                )
+                result = next((r for r in results if r.cell_id == dep.cell_id), None)
                 if not result:
                     raise ValueError(
                         f"Cell '{dep.cell_id}' not found in {dep.file_path.name}. "
@@ -271,7 +263,9 @@ def resolve_file_env_vars(
 
                 # Create env var like UVNOTE_FILE_ALGEBRA_CELLX
                 # Point to the cache directory for that cell
-                cache_dir = dep.file_path.parent / ".uvnote" / "cache" / result.cache_key
+                cache_dir = (
+                    dep.file_path.parent / ".uvnote" / "cache" / result.cache_key
+                )
                 key = (
                     f"UVNOTE_FILE_"
                     f"{sanitize_env_key(dep.file_path.stem)}_"
@@ -284,7 +278,12 @@ def resolve_file_env_vars(
                 manifest = {}
                 for result in results:
                     if result.success:
-                        cache_dir = dep.file_path.parent / ".uvnote" / "cache" / result.cache_key
+                        cache_dir = (
+                            dep.file_path.parent
+                            / ".uvnote"
+                            / "cache"
+                            / result.cache_key
+                        )
                         manifest[result.cell_id] = str(cache_dir.resolve())
 
                 # Write manifest to a temp location
@@ -292,7 +291,7 @@ def resolve_file_env_vars(
                 manifest_dir.mkdir(parents=True, exist_ok=True)
                 manifest_path = manifest_dir / f"{dep.file_path.stem}_manifest.json"
 
-                with open(manifest_path, 'w') as f:
+                with open(manifest_path, "w") as f:
                     json.dump(manifest, f, indent=2)
 
                 key = f"UVNOTE_FILE_{sanitize_env_key(dep.file_path.stem)}"
@@ -361,11 +360,13 @@ def build_directory(
 
             with open(md_file) as f:
                 content = f.read()
-            config, cells = parse_markdown(content)
+            config, cells = parse_markdown(content, source_file=md_file)
             validate_cells(cells)
 
             # Resolve file dependencies for this file
-            cell_file_deps = resolve_file_dependencies(md_file_resolved, cells, input_path)
+            cell_file_deps = resolve_file_dependencies(
+                md_file_resolved, cells, input_path
+            )
 
             file_infos[md_file_resolved] = (config, cells, cell_file_deps)
             all_files_cells[md_file_resolved] = cells
@@ -409,7 +410,9 @@ def build_directory(
     file_order, cyclic_files = topological_sort_files(file_graph)
 
     if cyclic_files:
-        click.echo("\nWarning: Some files involved in circular dependencies (skipping):")
+        click.echo(
+            "\nWarning: Some files involved in circular dependencies (skipping):"
+        )
         for f in cyclic_files:
             click.echo(f"  {f.name}")
 
@@ -422,7 +425,7 @@ def build_directory(
             click.echo(f"  roots: {', '.join(f.name for f in roots)}")
         for f in file_order:
             if file_graph.get(f):
-                dep_names = ', '.join(d.name for d in file_graph[f])
+                dep_names = ", ".join(d.name for d in file_graph[f])
                 click.echo(f"  {f.name} -> {dep_names}")
 
     click.echo(f"\nBuild order: {' -> '.join(f.name for f in file_order)}\n")
@@ -453,8 +456,9 @@ def build_directory(
                 rpath_normalized = rpath.rstrip("/")
 
                 # Support both exact file matches and directory/subdirectory prefix matches
-                if (relative_str == rpath_normalized or
-                    relative_str.startswith(rpath_normalized + "/")):
+                if relative_str == rpath_normalized or relative_str.startswith(
+                    rpath_normalized + "/"
+                ):
                     file_should_rerun = True
                     break
 
@@ -507,7 +511,9 @@ def build_directory(
                 use_cache=not (no_cache or file_should_rerun),
                 env_vars=file_env_vars,  # Pass file dependency env vars
                 force_rerun_cells=force_rerun_cells,
-                incremental_callback=None if not incremental else lambda r: None,  # Simplified for directory builds
+                incremental_callback=None
+                if not incremental
+                else lambda r: None,  # Simplified for directory builds
             )
 
             # Store results for dependent files (use resolved path as key)
@@ -526,7 +532,16 @@ def build_directory(
             # Back button always goes to index.html in same directory
             parent_dir = "index.html"
             # Pass relative path for GitHub button
-            generate_html(content, config, cells, results, output_file, work_dir, parent_dir=parent_dir, source_file=relative_path)
+            generate_html(
+                content,
+                config,
+                cells,
+                results,
+                output_file,
+                work_dir,
+                parent_dir=parent_dir,
+                source_file=relative_path,
+            )
             click.echo(f"  Generated: {output_file}")
 
             # Copy cell files
@@ -547,8 +562,10 @@ def build_directory(
     generate_directory_indexes(input_path, output, md_files)
 
     # Report summary
-    click.echo(f"\n{'='*60}")
-    click.echo(f"Build complete: {len(md_files) - len(errors)} succeeded, {len(errors)} failed")
+    click.echo(f"\n{'=' * 60}")
+    click.echo(
+        f"Build complete: {len(md_files) - len(errors)} succeeded, {len(errors)} failed"
+    )
 
     if errors:
         click.echo("\nFailed files:")
@@ -598,7 +615,9 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 
         # Add subdirectories
         for subdir in sorted(contents["subdirs"]):
-            file_items.append(f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>")
+            file_items.append(
+                f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>"
+            )
 
         # Add files
         for file in sorted(contents["files"]):
@@ -689,20 +708,24 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 
         # Add controls with back button if not at root
         if has_parent:
-            html_lines.extend([
-                "  <div class='controls'>",
-                f"    <a href='{parent_link}' class='back-button'>← back</a>",
-                "  </div>",
-            ])
+            html_lines.extend(
+                [
+                    "  <div class='controls'>",
+                    f"    <a href='{parent_link}' class='back-button'>← back</a>",
+                    "  </div>",
+                ]
+            )
 
         html_lines.append(f"  <h1>Index of /{dir_path or ''}</h1>")
         html_lines.append("  <ul>")
         html_lines.extend(file_items)
-        html_lines.extend([
-            "  </ul>",
-            "</body>",
-            "</html>",
-        ])
+        html_lines.extend(
+            [
+                "  </ul>",
+                "</body>",
+                "</html>",
+            ]
+        )
 
         # Write index file
         index_file.write_text("\n".join(html_lines))
@@ -752,7 +775,9 @@ def build(
 
     if input_path.is_dir() or recursive:
         # Handle directory build
-        return build_directory(input_path, output, no_cache, rerun, dependencies, incremental, rerun_path)
+        return build_directory(
+            input_path, output, no_cache, rerun, dependencies, incremental, rerun_path
+        )
 
     # Resolve file path (download if URL)
     resolved_file = resolve_file_path(file)
@@ -774,7 +799,7 @@ def build(
 
     # Parse cells
     try:
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
     except Exception as e:
         click.echo(f"Error parsing markdown: {e}", err=True)
@@ -906,7 +931,13 @@ def build(
                         mixed_results.append(placeholder)
 
                 generate_html(
-                    content, config, cells, mixed_results, output_file, work_dir, source_file=Path(resolved_file.name)
+                    content,
+                    config,
+                    cells,
+                    mixed_results,
+                    output_file,
+                    work_dir,
+                    source_file=Path(resolved_file.name),
                 )
                 logger.info(f"  incremental_update: {output_file}")
             except Exception as e:
@@ -916,7 +947,13 @@ def build(
 
         try:
             generate_html(
-                content, config, cells, initial_results, output_file, work_dir, source_file=Path(resolved_file.name)
+                content,
+                config,
+                cells,
+                initial_results,
+                output_file,
+                work_dir,
+                source_file=Path(resolved_file.name),
             )
             logger.info(f"  initial: {output_file}")
         except Exception as e:
@@ -947,7 +984,15 @@ def build(
     # Generate final HTML (only if not incremental, since incremental already generated it)
     if not incremental:
         try:
-            generate_html(content, config, cells, results, output_file, work_dir, source_file=Path(resolved_file.name))
+            generate_html(
+                content,
+                config,
+                cells,
+                results,
+                output_file,
+                work_dir,
+                source_file=Path(resolved_file.name),
+            )
             click.echo(f"Generated: {output_file}")
         except Exception as e:
             click.echo(f"Error generating HTML: {e}", err=True)
@@ -1006,7 +1051,7 @@ def run(
         with open(resolved_file) as f:
             content = f.read()
 
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -1229,7 +1274,7 @@ def build_loading(file: str, output: Optional[Path]):
     try:
         from .parser import parse_markdown, validate_cells
 
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
     except Exception as e:
         click.echo(f"Error parsing markdown: {e}", err=True)
@@ -1320,7 +1365,15 @@ def build_loading(file: str, output: Optional[Path]):
     try:
         from .generator import generate_html
 
-        generate_html(content, config, cells, results, output_file, work_dir, source_file=Path(resolved_file.name))
+        generate_html(
+            content,
+            config,
+            cells,
+            results,
+            output_file,
+            work_dir,
+            source_file=Path(resolved_file.name),
+        )
         click.echo(f"Generated: {output_file}")
     except Exception as e:
         click.echo(f"Error generating HTML: {e}", err=True)
@@ -1362,7 +1415,7 @@ def graph(file: str):
 
         from .parser import parse_markdown, validate_cells
 
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -1516,7 +1569,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
         try:
             with open(resolved_file) as f:
                 content = f.read()
-            config, cells = parse_markdown(content)
+            config, cells = parse_markdown(content, source_file=resolved_file)
             validate_cells(cells)
 
             # Prepare initial results from cache or placeholders so nothing disappears
@@ -1686,7 +1739,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
             # Read and parse the current file
             with open(resolved_file) as f:
                 content = f.read()
-            config, cells = parse_markdown(content)
+            config, cells = parse_markdown(content, source_file=resolved_file)
             validate_cells(cells)
 
             # Check staleness of all cells
@@ -1779,7 +1832,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
     try:
         with open(resolved_file) as f:
             content = f.read()
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
 
         # Create loading placeholders for all cells
@@ -1842,7 +1895,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
             from uvnote.parser import parse_markdown, validate_cells
             from uvnote.executor import execute_cell
 
-            config, cells = parse_markdown(content)
+            config, cells = parse_markdown(content, source_file=Path(resolved_file))
             validate_cells(cells)
             target = next((c for c in cells if c.id == cell_id), None)
             if not target:
@@ -1902,7 +1955,7 @@ def export(file: str, cell: Optional[str], output: Optional[Path]):
 
         from .parser import parse_markdown, validate_cells
 
-        config, cells = parse_markdown(content)
+        config, cells = parse_markdown(content, source_file=resolved_file)
         validate_cells(cells)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

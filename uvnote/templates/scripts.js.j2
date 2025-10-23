@@ -2182,7 +2182,12 @@
                 if(output){
                     output.classList.remove('output-stale');
                     let html='';
-                    if(data.stdout) html+='<div class="cell-stdout">'+escapeHtml(data.stdout)+'</div>';
+                    if (data.stdout) {
+                    html += '<div class="cell-stdout"><pre class="stdout-text">'
+                        + escapeHtml(data.stdout)
+                        + '</pre></div>';
+                    }
+
                     console.log('UV Logs:', data);
                     if(data.stderr) {
                         // Split UV logs from regular stderr
@@ -2304,27 +2309,27 @@
             }
         }
 
-        // Live reload functionality (robust SSE handling)
-        (function(){
-            if (!('EventSource' in window)) {
-                console.warn('SSE not supported in this browser');
-                return;
-            }
-            let source = new EventSource('/events');
-            let isOpen = false;
-            source.onopen = function(){ isOpen = true; console.log('SSE connected'); };
-            source.onmessage = function(e){
-                const msg=(e.data||'').trim(); if(!msg) return;
-                console.log('SSE message:', msg);
-                if (msg==='reload' || msg==='incremental') { location.reload(); }
-                // Ignore 'loading' to avoid premature reload loops
-            };
-            source.onerror = function(e){
-                // Let EventSource auto-reconnect instead of forcing a reload
-                if (isOpen) console.warn('SSE error after open, retrying...', e);
-            };
-            window.addEventListener('beforeunload', function(){ try{source.close();}catch(_){} });
-        })();
+        // // Live reload functionality (robust SSE handling)
+        // (function(){
+        //     if (!('EventSource' in window)) {
+        //         console.warn('SSE not supported in this browser');
+        //         return;
+        //     }
+        //     let source = new EventSource('/events');
+        //     let isOpen = false;
+        //     source.onopen = function(){ isOpen = true; console.log('SSE connected'); };
+        //     source.onmessage = function(e){
+        //         const msg=(e.data||'').trim(); if(!msg) return;
+        //         console.log('SSE message:', msg);
+        //         if (msg==='reload' || msg==='incremental') { location.reload(); }
+        //         // Ignore 'loading' to avoid premature reload loops
+        //     };
+        //     source.onerror = function(e){
+        //         // Let EventSource auto-reconnect instead of forcing a reload
+        //         if (isOpen) console.warn('SSE error after open, retrying...', e);
+        //     };
+        //     window.addEventListener('beforeunload', function(){ try{source.close();}catch(_){} });
+        // })();
 
 
         document.addEventListener('DOMContentLoaded', function() {

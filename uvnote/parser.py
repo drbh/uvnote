@@ -22,8 +22,12 @@ class DocumentConfig:
     collapse_code: bool = True
     custom_css: str = ""
     code_font_size: Optional[Any] = None  # CSS size token or number (px)
-    on_github: Optional[str] = None  # GitHub repo path (e.g., "huggingface/kernels-uvnotes")
-    on_huggingface: Optional[str] = None  # Hugging Face kernel path (e.g., "kernels-community/flash-attn2")
+    on_github: Optional[str] = (
+        None  # GitHub repo path (e.g., "huggingface/kernels-uvnotes")
+    )
+    on_huggingface: Optional[str] = (
+        None  # Hugging Face kernel path (e.g., "kernels-community/flash-attn2")
+    )
 
 
 @dataclass
@@ -42,6 +46,9 @@ class CodeCell:
     collapse_output: bool = False
     commented: bool = False
     timeout: Optional[int] = None  # Custom timeout in seconds
+    script_file: Optional[str] = (
+        None  # External script file path (e.g., "scripts/analysis.py")
+    )
 
 
 def parse_attributes(info_string: str) -> Dict[str, str]:
@@ -98,14 +105,14 @@ def parse_cell_needs(needs_attr: str) -> Tuple[List[str], List[str]]:
     local = []
     files = []
 
-    for need in needs_attr.split(','):
+    for need in needs_attr.split(","):
         need = need.strip()
         if not need:
             continue
 
         # Check if this looks like a file path
         # File paths contain '/' or end with '.md'
-        if '/' in need or need.endswith('.md'):
+        if "/" in need or need.endswith(".md"):
             files.append(need)
         else:
             local.append(need)
@@ -175,8 +182,15 @@ def parse_frontmatter(content: str) -> Tuple[DocumentConfig, str]:
     return config, remaining_content
 
 
-def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
-    """Parse markdown content and extract config + Python code cells."""
+def parse_markdown(
+    content: str, source_file: Optional[Path] = None
+) -> Tuple[DocumentConfig, List[CodeCell]]:
+    """Parse markdown content and extract config + Python code cells.
+
+    Args:
+        content: Markdown content to parse
+        source_file: Path to the source markdown file (used to resolve relative script paths)
+    """
     config, markdown_content = parse_frontmatter(content)
 
     cells = []
@@ -222,8 +236,35 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                     code_lines.append(lines[i])
                     i += 1
 
-            if code_lines:
-                code = "\n".join(code_lines)
+            # Check if script attribute is present
+            script_file = attrs.get("script")
+
+            if script_file:
+                # Load code from external script file
+                if source_file:
+                    # Resolve script path relative to the markdown file
+                    script_path = (source_file.parent / script_file).resolve()
+                else:
+                    # Fallback to current directory
+                    script_path = Path(script_file).resolve()
+
+                try:
+                    with open(script_path, "r") as f:
+                        code = f.read()
+                except FileNotFoundError:
+                    raise ValueError(
+                        f"Script file not found: {script_file} (resolved to {script_path})"
+                    )
+                except Exception as e:
+                    raise ValueError(f"Error reading script file {script_file}: {e}")
+            else:
+                # Use code from code block
+                if code_lines:
+                    code = "\n".join(code_lines)
+                else:
+                    code = ""
+
+            if code or script_file:  # Allow empty code blocks if script is specified
                 cell_id = attrs.get("id", generate_cell_id(code))
 
                 # Parse dependencies
@@ -279,6 +320,7 @@ def parse_markdown(content: str) -> Tuple[DocumentConfig, List[CodeCell]]:
                     collapse_output=collapse_output,
                     commented=commented,
                     timeout=timeout,
+                    script_file=script_file,
                 )
                 cells.append(cell)
 

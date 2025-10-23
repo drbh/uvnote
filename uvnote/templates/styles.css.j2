@@ -618,6 +618,29 @@
             white-space: pre-wrap;
             color: var(--text-primary);
         }
+
+        .cell-stdout {
+            background: var(--bg-tertiary);
+            padding: 0.75rem;
+            border-radius: 1px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+
+            /* key bits */
+            overflow: auto;          /* show scrollbars when needed */
+            max-width: 100%;         /* respects whatever layout width you give it */
+        }
+
+        .cell-stdout .stdout-text {
+            margin: 0;               /* reset pre default margin */
+            white-space: pre;        /* keep line breaks, NO wrapping */
+            display: inline-block;   /* shrink-to-content */
+            min-width: max-content;  /* allow very long lines to define intrinsic width */
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            tab-size: 2;
+        }
+
         .cell-stderr {
             background: var(--bg-error);
             border-left: 2px solid var(--border-error);

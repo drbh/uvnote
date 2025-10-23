@@ -14,7 +14,9 @@ class FileDependency:
     """Represents a dependency on another file or specific cell in that file."""
 
     file_path: Path  # Resolved absolute path to the markdown file
-    cell_id: Optional[str] = None  # If depending on specific cell, None means entire file
+    cell_id: Optional[str] = (
+        None  # If depending on specific cell, None means entire file
+    )
 
     @property
     def key(self) -> str:
@@ -47,17 +49,15 @@ def parse_file_reference(ref: str) -> Tuple[str, Optional[str]]:
         "../math/algebra.md:cellX" -> ("../math/algebra.md", "cellX")
         "math/algebra.md:cell_a:cell_b" -> ("math/algebra.md", "cell_a:cell_b")
     """
-    if ':' in ref:
+    if ":" in ref:
         # Split only on first colon to allow colons in cell IDs
-        file_part, cell_part = ref.split(':', 1)
+        file_part, cell_part = ref.split(":", 1)
         return file_part.strip(), cell_part.strip()
     return ref.strip(), None
 
 
 def resolve_file_dependencies(
-    md_file: Path,
-    cells: List[CodeCell],
-    input_root: Path
+    md_file: Path, cells: List[CodeCell], input_root: Path
 ) -> Dict[str, List[FileDependency]]:
     """
     Extract and resolve all file dependencies from cells in a markdown file.
@@ -98,7 +98,7 @@ def resolve_file_dependencies(
                 )
 
             # Validate it's a markdown file
-            if not dep_path.suffix == '.md':
+            if not dep_path.suffix == ".md":
                 raise ValueError(
                     f"File dependency must be a .md file: '{ref}' "
                     f"(resolved to {dep_path}) "
@@ -126,7 +126,7 @@ def resolve_file_dependencies(
 
 
 def build_file_dependency_graph(
-    file_infos: Dict[Path, Tuple[List[CodeCell], Dict[str, List[FileDependency]]]]
+    file_infos: Dict[Path, Tuple[List[CodeCell], Dict[str, List[FileDependency]]]],
 ) -> Dict[Path, Set[Path]]:
     """
     Build a file-level dependency graph from cell-level file dependencies.
@@ -161,7 +161,7 @@ def build_file_dependency_graph(
 
 
 def topological_sort_files(
-    graph: Dict[Path, Set[Path]]
+    graph: Dict[Path, Set[Path]],
 ) -> Tuple[List[Path], Set[Path]]:
     """
     Perform topological sort on file dependency graph using Kahn's algorithm.
@@ -263,7 +263,7 @@ def detect_cycles(graph: Dict[Path, Set[Path]]) -> List[List[Path]]:
 def validate_cell_references(
     file_path: Path,
     cell_file_deps: Dict[str, List[FileDependency]],
-    all_files_cells: Dict[Path, List[CodeCell]]
+    all_files_cells: Dict[Path, List[CodeCell]],
 ) -> None:
     """
     Validate that cell-specific file dependencies reference valid cells.
@@ -293,7 +293,9 @@ def validate_cell_references(
             target_cell_ids = {c.id for c in target_cells}
 
             if dep.cell_id not in target_cell_ids:
-                available = ', '.join(sorted(target_cell_ids)) if target_cell_ids else 'none'
+                available = (
+                    ", ".join(sorted(target_cell_ids)) if target_cell_ids else "none"
+                )
                 raise ValueError(
                     f"Cell '{dep.cell_id}' not found in {dep.file_path.name}. "
                     f"Referenced by {file_path.name}:{cell_id} at line "

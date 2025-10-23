@@ -69,7 +69,7 @@ def split_uv_install_logs(stderr: str) -> Tuple[str, str]:
     Returns:
         (uv_install_logs, regular_stderr)
     """
-    lines = stderr.split('\n')
+    lines = stderr.split("\n")
     uv_logs = []
     regular_logs = []
     in_uv_section = True
@@ -78,7 +78,7 @@ def split_uv_install_logs(stderr: str) -> Tuple[str, str]:
         if in_uv_section:
             uv_logs.append(line)
             # Check if we've reached the end of UV install logs
-            if line.startswith('Installed '):
+            if line.startswith("Installed "):
                 in_uv_section = False
         else:
             regular_logs.append(line)
@@ -87,10 +87,12 @@ def split_uv_install_logs(stderr: str) -> Tuple[str, str]:
     if in_uv_section:
         return "", stderr
 
-    return '\n'.join(uv_logs), '\n'.join(regular_logs).strip()
+    return "\n".join(uv_logs), "\n".join(regular_logs).strip()
 
 
-def render_artifact_preview(artifact: str, cell_id: str, cache_dir: Path, cache_key: str) -> str:
+def render_artifact_preview(
+    artifact: str, cell_id: str, cache_dir: Path, cache_key: str
+) -> str:
     """Render a single artifact preview as HTML."""
     html_parts = []
 
@@ -131,7 +133,8 @@ def render_artifact_preview(artifact: str, cell_id: str, cache_dir: Path, cache_
         if csv_path.exists():
             try:
                 import csv
-                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+
+                with open(csv_path, "r", newline="", encoding="utf-8") as f:
                     reader = csv.reader(f)
                     rows = list(reader)
 
@@ -141,34 +144,39 @@ def render_artifact_preview(artifact: str, cell_id: str, cache_dir: Path, cache_
 
                     # First row as header
                     if len(rows) > 0:
-                        html_parts.append('<thead><tr>')
+                        html_parts.append("<thead><tr>")
                         for cell in rows[0]:
-                            html_parts.append(f'<th>{html.escape(cell)}</th>')
-                        html_parts.append('</tr></thead>')
+                            html_parts.append(f"<th>{html.escape(cell)}</th>")
+                        html_parts.append("</tr></thead>")
 
                     # Remaining rows as data
                     if len(rows) > 1:
-                        html_parts.append('<tbody>')
+                        html_parts.append("<tbody>")
                         for row in rows[1:]:
-                            html_parts.append('<tr>')
+                            html_parts.append("<tr>")
                             for cell in row:
-                                html_parts.append(f'<td>{html.escape(cell)}</td>')
-                            html_parts.append('</tr>')
-                        html_parts.append('</tbody>')
+                                html_parts.append(f"<td>{html.escape(cell)}</td>")
+                            html_parts.append("</tr>")
+                        html_parts.append("</tbody>")
 
-                    html_parts.append('</table>')
-                    html_parts.append('</div>')
+                    html_parts.append("</table>")
+                    html_parts.append("</div>")
             except Exception as e:
                 # Show error message if CSV parsing fails
                 html_parts.append('<div class="artifact-preview artifact-csv-error">')
-                html_parts.append(f'<p>Error rendering CSV: {html.escape(str(e))}</p>')
-                html_parts.append('</div>')
+                html_parts.append(f"<p>Error rendering CSV: {html.escape(str(e))}</p>")
+                html_parts.append("</div>")
 
     return "\n".join(html_parts)
 
 
 def render_cell(
-    cell: CodeCell, result: ExecutionResult, highlighted_code: str, work_dir: Path, config: DocumentConfig, source_file: Optional[Path] = None
+    cell: CodeCell,
+    result: ExecutionResult,
+    highlighted_code: str,
+    work_dir: Path,
+    config: DocumentConfig,
+    source_file: Optional[Path] = None,
 ) -> str:
     """Render a single cell as HTML."""
     cell_class = "cell"
@@ -182,7 +190,7 @@ def render_cell(
     # Cell header
     header_parts = [f"Cell: {cell.id}"]
     if cell.deps:
-        header_parts.append(f'deps: {", ".join(cell.deps)}')
+        header_parts.append(f"deps: {', '.join(cell.deps)}")
     if result.duration:
         header_parts.append(f"{result.duration:.2f}s")
     if not result.success:
@@ -233,8 +241,8 @@ def render_cell(
     # Add GitHub button if on_github is configured and source_file is provided
     if config.on_github and source_file:
         # Construct GitHub URL: https://github.com/{repo}/blob/main/{path}
-        github_path = str(source_file).replace('\\', '/')  # Windows path compat
-        github_url = f'https://github.com/{config.on_github}/blob/main/{github_path}'
+        github_path = str(source_file).replace("\\", "/")  # Windows path compat
+        github_url = f"https://github.com/{config.on_github}/blob/main/{github_path}"
         html_parts.append(
             f'<a href="{github_url}" target="_blank" class="github-btn">GitHub</a>'
         )
@@ -242,7 +250,7 @@ def render_cell(
     # Add Hugging Face button if on_huggingface is configured
     if config.on_huggingface:
         # Construct Hugging Face URL: https://huggingface.co/{kernel_path}
-        hf_url = f'https://huggingface.co/{config.on_huggingface}'
+        hf_url = f"https://huggingface.co/{config.on_huggingface}"
         html_parts.append(
             f'<a href="{hf_url}" target="_blank" class="hf-btn">🤗 HF</a>'
         )
@@ -253,7 +261,9 @@ def render_cell(
     code_class = "cell-code"
     if cell.collapse_code:
         code_class += " collapsed"
-    html_parts.append(f'<div id="code-{cell.id}" class="{code_class}" data-lines="{len(cell.code.splitlines())}">')
+    html_parts.append(
+        f'<div id="code-{cell.id}" class="{code_class}" data-lines="{len(cell.code.splitlines())}">'
+    )
     if config.show_line_numbers:
         # Two-column layout: clickable line numbers + highlighted code
         html_parts.append('<div class="highlight-with-lines">')
@@ -262,22 +272,26 @@ def render_cell(
         for i, _ in enumerate(cell.code.splitlines(), start=1):
             html_parts.append(
                 f'<a class="line-number" data-cell="{cell.id}" data-line="{i}" href="#cell-{cell.id}" '
-                f'onclick="event.preventDefault(); selectCellLine(\'{cell.id}\', {i}, true);">{i}</a>'
+                f"onclick=\"event.preventDefault(); selectCellLine('{cell.id}', {i}, true);\">{i}</a>"
             )
-        html_parts.append('</div>')
+        html_parts.append("</div>")
         # Code area wrap (for overlay positioning)
         html_parts.append('<div class="code-wrap">')
         html_parts.append(highlighted_code)
-        html_parts.append(f'<div class="code-line-highlight" id="line-highlight-{cell.id}"></div>')
-        html_parts.append('</div>')
-        html_parts.append('</div>')
+        html_parts.append(
+            f'<div class="code-line-highlight" id="line-highlight-{cell.id}"></div>'
+        )
+        html_parts.append("</div>")
+        html_parts.append("</div>")
     else:
         # No line numbers; still add a wrap with overlay for highlighting support
         html_parts.append('<div class="code-wrap">')
         html_parts.append(highlighted_code)
-        html_parts.append(f'<div class="code-line-highlight" id="line-highlight-{cell.id}"></div>')
-        html_parts.append('</div>')
-    html_parts.append('</div>')
+        html_parts.append(
+            f'<div class="code-line-highlight" id="line-highlight-{cell.id}"></div>'
+        )
+        html_parts.append("</div>")
+    html_parts.append("</div>")
 
     # Cell output - handle collapse state
     output_class = "cell-output"
@@ -295,22 +309,33 @@ def render_cell(
         # Find and replace inline artifact references: ![artifact:filename]
         if result.artifacts:
             import re
-            pattern = r'!\[artifact:([^\]]+)\]'
+
+            pattern = r"!\[artifact:([^\]]+)\]"
 
             def replace_artifact_ref(match):
                 artifact_name = match.group(1)
                 if artifact_name in result.artifacts:
                     embedded_artifacts.add(artifact_name)
-                    return render_artifact_preview(artifact_name, cell.id, cache_dir, result.cache_key)
+                    return render_artifact_preview(
+                        artifact_name, cell.id, cache_dir, result.cache_key
+                    )
                 return match.group(0)  # Keep original if artifact not found
 
             stdout_content = re.sub(pattern, replace_artifact_ref, stdout_content)
 
+        # if getattr(result, "is_html", False):
+        #     html_parts.append(f'<div class="cell-stdout">{stdout_content}</div>')
+        # else:
+        #     html_parts.append(
+        #         f'<div class="cell-stdout">{html.escape(stdout_content)}</div>'
+        #     )
         if getattr(result, "is_html", False):
-            html_parts.append(f'<div class="cell-stdout">{stdout_content}</div>')
+            html_parts.append(
+                f'<div class="cell-stdout"><pre class="stdout-text">{stdout_content}</pre></div>'
+            )
         else:
             html_parts.append(
-                f'<div class="cell-stdout">{html.escape(stdout_content)}</div>'
+                f'<div class="cell-stdout"><pre class="stdout-text">{html.escape(stdout_content)}</pre></div>'
             )
 
     if result.stderr:
@@ -322,12 +347,10 @@ def render_cell(
             html_parts.append(
                 f'<div class="uv-logs-header" onclick="toggleUvLogs(this)">▶ UV Install Logs</div>'
             )
-            html_parts.append(
-                f'<div class="uv-logs-content" style="display: none;">'
-            )
+            html_parts.append(f'<div class="uv-logs-content" style="display: none;">')
             html_parts.append(html.escape(uv_logs))
-            html_parts.append('</div>')
-            html_parts.append('</div>')
+            html_parts.append("</div>")
+            html_parts.append("</div>")
 
         # Add regular stderr if present
         if regular_stderr:
@@ -347,7 +370,9 @@ def render_cell(
         # Embed previews for artifacts not already embedded inline
         for artifact in result.artifacts:
             if artifact not in embedded_artifacts:
-                preview_html = render_artifact_preview(artifact, cell.id, cache_dir, result.cache_key)
+                preview_html = render_artifact_preview(
+                    artifact, cell.id, cache_dir, result.cache_key
+                )
                 if preview_html:
                     html_parts.append(preview_html)
 
@@ -359,7 +384,9 @@ def render_cell(
     return "\n".join(html_parts)
 
 
-def process_inline_artifact_refs(content: str, results: List[ExecutionResult], work_dir: Path) -> str:
+def process_inline_artifact_refs(
+    content: str, results: List[ExecutionResult], work_dir: Path
+) -> str:
     """Process inline artifact references in markdown content."""
     import re
 
@@ -379,7 +406,7 @@ def process_inline_artifact_refs(content: str, results: List[ExecutionResult], w
             return render_artifact_preview(artifact_name, cell_id, cache_dir, cache_key)
         return match.group(0)  # Keep original if artifact not found
 
-    pattern = r'!\[artifact:([^\]]+)\]'
+    pattern = r"!\[artifact:([^\]]+)\]"
     return re.sub(pattern, replace_artifact_ref, content)
 
 
@@ -429,7 +456,12 @@ def generate_html(
                     if result:
                         highlighted_code = highlight_code(cell.code, config)
                         cell_html = render_cell(
-                            cell, result, highlighted_code, work_dir, config, source_file
+                            cell,
+                            result,
+                            highlighted_code,
+                            work_dir,
+                            config,
+                            source_file,
                         )
                         new_lines.append(cell_html)
                     cell_found = True
