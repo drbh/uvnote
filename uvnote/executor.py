@@ -563,6 +563,7 @@ def execute_cells(
     env_vars: Optional[Dict[str, str]] = None,
     force_rerun_cells: Optional[Set[str]] = None,
     incremental_callback: Optional[Callable[[List["ExecutionResult"]], None]] = None,
+    strict: bool = False,
 ) -> List[ExecutionResult]:
     """Execute multiple cells in true topological dependency order.
 
@@ -674,8 +675,11 @@ def execute_cells(
         if result.success:
             logger.info(f"  result=success")
         else:
-            logger.error(f"  result=failed stopping=true")
-            break
+            if strict:
+                logger.error(f"  result=failed stopping=true (strict_mode)")
+                break
+            else:
+                logger.warning(f"  result=failed continuing=true")
 
         # Call incremental callback if provided
         if incremental_callback:
@@ -721,6 +725,7 @@ def execute_cells_cancellable(
     force_rerun_cells: Optional[Set[str]] = None,
     incremental_callback: Optional[Callable[[List["ExecutionResult"]], None]] = None,
     cancel_event: Optional[threading.Event] = None,
+    strict: bool = False,
 ) -> List[ExecutionResult]:
     """Execute multiple cells with cancellation support.
 
@@ -846,8 +851,11 @@ def execute_cells_cancellable(
         if result.success:
             logger.info(f"  result=success")
         else:
-            logger.error(f"  result=failed stopping=true")
-            break
+            if strict:
+                logger.error(f"  result=failed stopping=true (strict_mode)")
+                break
+            else:
+                logger.warning(f"  result=failed continuing=true")
 
         # Call incremental callback if provided
         if incremental_callback:

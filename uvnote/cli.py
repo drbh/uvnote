@@ -308,6 +308,7 @@ def build_directory(
     dependencies: bool,
     incremental: bool,
     rerun_path: tuple,
+    strict: bool,
 ) -> int:
     """Build all markdown files in a directory recursively."""
 
@@ -514,6 +515,7 @@ def build_directory(
                 incremental_callback=None
                 if not incremental
                 else lambda r: None,  # Simplified for directory builds
+                strict=strict,
             )
 
             # Store results for dependent files (use resolved path as key)
@@ -525,6 +527,17 @@ def build_directory(
                 click.echo(f"  Warning: {len(failed_cells)} cells failed")
                 for result in failed_cells:
                     errors.append(f"{relative_path} - {result.cell_id}")
+
+                # In strict mode, stop building immediately on any cell failure
+                if strict:
+                    click.echo(
+                        f"\nError: Build stopped due to cell failure in strict mode",
+                        err=True,
+                    )
+                    click.echo(f"Failed cells in {relative_path}:")
+                    for result in failed_cells:
+                        click.echo(f"  - {result.cell_id}", err=True)
+                    return 1
 
             # Generate HTML
             output_file = output_subdir / f"{md_file.stem}.html"
@@ -758,6 +771,9 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
     multiple=True,
     help="Force rerun for files in specific path(s) only (can be used multiple times)",
 )
+@click.option(
+    "--strict", is_flag=True, help="Stop building if any cell execution fails"
+)
 def build(
     file: str,
     output: Optional[Path],
@@ -767,6 +783,7 @@ def build(
     incremental: bool,
     recursive: bool,
     rerun_path: tuple,
+    strict: bool,
 ):
     """Build static HTML from markdown file or directory."""
 
@@ -776,7 +793,14 @@ def build(
     if input_path.is_dir() or recursive:
         # Handle directory build
         return build_directory(
-            input_path, output, no_cache, rerun, dependencies, incremental, rerun_path
+            input_path,
+            output,
+            no_cache,
+            rerun,
+            dependencies,
+            incremental,
+            rerun_path,
+            strict,
         )
 
     # Resolve file path (download if URL)
@@ -967,6 +991,7 @@ def build(
             use_cache=not (no_cache or rerun),
             force_rerun_cells=force_rerun_cells,
             incremental_callback=incremental_callback,
+            strict=strict,
         )
     except Exception as e:
         click.echo(f"Error executing cells: {e}", err=True)
@@ -980,6 +1005,13 @@ def build(
             click.echo(
                 f"  - {result.cell_id}: {result.stderr.split()[0] if result.stderr else 'Unknown error'}"
             )
+
+        # In strict mode, stop building immediately on any cell failure
+        if strict:
+            click.echo(
+                f"\nError: Build stopped due to cell failure in strict mode", err=True
+            )
+            return 1
 
     # Generate final HTML (only if not incremental, since incremental already generated it)
     if not incremental:
