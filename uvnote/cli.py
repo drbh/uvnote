@@ -537,7 +537,9 @@ def build_directory(
                     click.echo(f"Failed cells in {relative_path}:")
                     for result in failed_cells:
                         click.echo(f"  - {result.cell_id}", err=True)
-                    return 1
+                    import sys
+
+                    sys.exit(1)
 
             # Generate HTML
             output_file = output_subdir / f"{md_file.stem}.html"
@@ -584,7 +586,9 @@ def build_directory(
         click.echo("\nFailed files:")
         for error in errors:
             click.echo(f"  - {error}")
-        return 1
+        import sys
+
+        sys.exit(1)
 
     return 0
 
@@ -1011,7 +1015,9 @@ def build(
             click.echo(
                 f"\nError: Build stopped due to cell failure in strict mode", err=True
             )
-            return 1
+            import sys
+
+            sys.exit(1)
 
     # Generate final HTML (only if not incremental, since incremental already generated it)
     if not incremental:
@@ -1050,6 +1056,12 @@ def build(
     except Exception as e:
         click.echo(f"Warning: Failed to copy cell files: {e}", err=True)
 
+    # Return non-zero exit code if any cells failed
+    if failed_cells:
+        click.echo(f"Build completed with {len(failed_cells)} failed cell(s)", err=True)
+        import sys
+
+        sys.exit(1)
     return 0
 
 
