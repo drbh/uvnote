@@ -524,9 +524,22 @@ def build_directory(
             # Check for failures
             failed_cells = [r for r in results if not r.success]
             if failed_cells:
-                click.echo(f"  Warning: {len(failed_cells)} cells failed")
+                click.echo(f"\n  Warning: {len(failed_cells)} cells failed in {relative_path}", err=True)
                 for result in failed_cells:
                     errors.append(f"{relative_path} - {result.cell_id}")
+                    click.echo(f"\n  {'=' * 58}", err=True)
+                    click.echo(f"  Failed cell: {result.cell_id}", err=True)
+                    click.echo(f"  {'=' * 58}", err=True)
+                    if result.stdout:
+                        click.echo("  STDOUT:", err=True)
+                        for line in result.stdout.splitlines():
+                            click.echo(f"    {line}", err=True)
+                    if result.stderr:
+                        click.echo("  STDERR:", err=True)
+                        for line in result.stderr.splitlines():
+                            click.echo(f"    {line}", err=True)
+                    if not result.stdout and not result.stderr:
+                        click.echo("  No output captured", err=True)
 
                 # In strict mode, stop building immediately on any cell failure
                 if strict:
@@ -534,11 +547,7 @@ def build_directory(
                         f"\nError: Build stopped due to cell failure in strict mode",
                         err=True,
                     )
-                    click.echo(f"Failed cells in {relative_path}:")
-                    for result in failed_cells:
-                        click.echo(f"  - {result.cell_id}", err=True)
                     import sys
-
                     sys.exit(1)
 
             # Generate HTML
@@ -1004,11 +1013,19 @@ def build(
     # Check for failures
     failed_cells = [r for r in results if not r.success]
     if failed_cells:
-        click.echo(f"Warning: {len(failed_cells)} cells failed execution")
+        click.echo(f"\nWarning: {len(failed_cells)} cells failed execution", err=True)
         for result in failed_cells:
-            click.echo(
-                f"  - {result.cell_id}: {result.stderr.split()[0] if result.stderr else 'Unknown error'}"
-            )
+            click.echo(f"\n{'=' * 60}", err=True)
+            click.echo(f"Failed cell: {result.cell_id}", err=True)
+            click.echo(f"{'=' * 60}", err=True)
+            if result.stdout:
+                click.echo("STDOUT:", err=True)
+                click.echo(result.stdout, err=True)
+            if result.stderr:
+                click.echo("STDERR:", err=True)
+                click.echo(result.stderr, err=True)
+            if not result.stdout and not result.stderr:
+                click.echo("No output captured", err=True)
 
         # In strict mode, stop building immediately on any cell failure
         if strict:
