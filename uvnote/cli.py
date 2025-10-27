@@ -1551,10 +1551,28 @@ def clean(all: bool):
     work_dir = Path.cwd()
 
     if all or click.confirm("Remove .uvnote directory?"):
-        uvnote_dir = work_dir / ".uvnote"
-        if uvnote_dir.exists():
-            shutil.rmtree(uvnote_dir)
-            click.echo("Removed .uvnote/")
+        if all:
+            # In --all mode, recursively find and remove all .uvnote directories
+            removed_count = 0
+            for uvnote_dir in work_dir.rglob(".uvnote"):
+                if uvnote_dir.is_dir():
+                    try:
+                        shutil.rmtree(uvnote_dir)
+                        # Show relative path for clarity
+                        rel_path = uvnote_dir.relative_to(work_dir)
+                        click.echo(f"Removed {rel_path}/")
+                        removed_count += 1
+                    except Exception as e:
+                        click.echo(f"Warning: Failed to remove {uvnote_dir}: {e}", err=True)
+
+            if removed_count == 0:
+                click.echo("No .uvnote directories found")
+        else:
+            # In interactive mode, only remove .uvnote in current directory
+            uvnote_dir = work_dir / ".uvnote"
+            if uvnote_dir.exists():
+                shutil.rmtree(uvnote_dir)
+                click.echo("Removed .uvnote/")
 
     if all or click.confirm("Remove site directory?"):
         site_dir = work_dir / "site"
