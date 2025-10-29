@@ -721,6 +721,14 @@
         .artifact-preview svg {
             background: transparent;
         }
+        /* Invert SVG images in dark mode */
+        :root[data-theme="dark"] .artifact-preview img[src$=".svg"] {
+            filter: invert(0.9) hue-rotate(180deg);
+        }
+        /* Keep SVG images readable in monocolor mode */
+        :root[data-ui="monocolor"] .artifact-preview img[src$=".svg"] {
+            filter: none;
+        }
         /* CSV table styling */
         .artifact-csv {
             margin-top: 1rem;
