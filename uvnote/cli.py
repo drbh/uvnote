@@ -6,7 +6,7 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Set, Union
 
 import click
 import pathspec
@@ -300,6 +300,89 @@ def resolve_file_env_vars(
     return env_vars
 
 
+def compute_upstream_dependencies(
+    file_graph: Dict[Path, Set[Path]], target_files: Set[Path]
+) -> Set[Path]:
+    """
+    Compute all files that the target files transitively depend on.
+
+    Args:
+        file_graph: Dict mapping file -> set of files it depends on
+        target_files: Set of files to find dependencies for
+
+    Returns:
+        Set of all files that target_files depend on (directly or transitively)
+
+    Example:
+        If A depends on B, and B depends on C:
+        file_graph = {A: {B}, B: {C}, C: set()}
+        target_files = {A}
+        Returns: {B, C}  # A depends on B and C
+    """
+    dependencies = set()
+    queue = list(target_files)
+    visited = set(target_files)
+
+    while queue:
+        current = queue.pop(0)
+        # Find files that current depends on
+        deps = file_graph.get(current, set())
+        for dep in deps:
+            if dep not in visited:
+                visited.add(dep)
+                dependencies.add(dep)
+                queue.append(dep)
+
+    return dependencies
+
+
+def compute_downstream_dependents(
+    file_graph: Dict[Path, Set[Path]], target_files: Set[Path]
+) -> Set[Path]:
+    """
+    Compute all files that transitively depend on the target files.
+
+    Args:
+        file_graph: Dict mapping file -> set of files it depends on
+        target_files: Set of files to find dependents for
+
+    Returns:
+        Set of all files that depend on target_files (directly or transitively)
+
+    Example:
+        If A depends on B, and B depends on C:
+        file_graph = {A: {B}, B: {C}, C: set()}
+        target_files = {C}
+        Returns: {B, A}  # Both B and A depend on C
+    """
+    # Build reverse graph: file -> files that depend on it
+    reverse_graph: Dict[Path, Set[Path]] = {}
+    for file, deps in file_graph.items():
+        if file not in reverse_graph:
+            reverse_graph[file] = set()
+        for dep in deps:
+            if dep not in reverse_graph:
+                reverse_graph[dep] = set()
+            reverse_graph[dep].add(file)
+
+    # BFS to find all transitive dependents
+    dependents = set()
+    queue = list(target_files)
+    visited = set(target_files)
+
+    while queue:
+        current = queue.pop(0)
+        # Find files that depend on current
+        if current in reverse_graph:
+            for dependent in reverse_graph[current]:
+                if dependent not in visited:
+                    visited.add(dependent)
+                    dependents.add(dependent)
+                    queue.append(dependent)
+
+    return dependents
+
+
 def build_directory(
     input_path: Path,
     output: Optional[Path],
@@ -308,6 +391,7 @@ def build_directory(
     dependencies: bool,
     incremental: bool,
     rerun_path: tuple,
+    rerun_isolated: bool,
     strict: bool,
 ) -> int:
     """Build all markdown files in a directory recursively."""
@@ -431,15 +515,56 @@ def build_directory(
 
     click.echo(f"\nBuild order: {' -> '.join(f.name for f in file_order)}\n")
 
+    # Phase 4: Compute rerun strategy with dependency awareness
+    # Map back from resolved paths to original for display
+    resolved_to_original = {f.resolve(): f for f in md_files}
+
+    # Determine which files should be rerun and why
+    rerun_reasons: Dict[Path, str] = {}  # resolved_path -> reason
+
+    # Parse rerun paths if provided
+    rerun_paths_list = list(rerun_path) if rerun_path else []
+
+    if rerun_paths_list:
+        click.echo("Phase 4a: Computing rerun strategy...")
+
+        # Find files that match the rerun paths
+        # Only these files will be rerun; all others use cache
+        path_matched_files = set()
+        for md_file_resolved in file_order:
+            md_file = resolved_to_original.get(md_file_resolved, md_file_resolved)
+            relative_path = md_file.relative_to(input_path)
+            relative_str = str(relative_path)
+
+            for rpath in rerun_paths_list:
+                rpath_normalized = rpath.rstrip("/")
+                if relative_str == rpath_normalized or relative_str.startswith(
+                    rpath_normalized + "/"
+                ):
+                    path_matched_files.add(md_file_resolved)
+                    rerun_reasons[md_file_resolved] = f"path match: {rpath}"
+                    break
+
+        click.echo(f"  Files to rerun (matching --rerun-path): {len(path_matched_files)}")
+        for f in path_matched_files:
+            click.echo(f"    - {resolved_to_original.get(f, f).name}")
+
+        # All files stay in the build, only matched files are rerun
+        files_with_cache = set(file_order) - path_matched_files
+
+        click.echo(f"\n  Build strategy:")
+        click.echo(f"    Files to rerun: {len(path_matched_files)}")
+        click.echo(f"    Files using cache: {len(files_with_cache)}")
+        click.echo(f"    Total files in build: {len(file_order)}")
+
+        click.echo()
+
     # Track directory structure for index generation
     dir_structure = {}
 
-    # Phase 4: Build each markdown file in dependency order
+    # Phase 5: Build each markdown file in dependency order
     errors = []
     built_files = {}  # Path -> List[ExecutionResult]
-
-    # Map back from resolved paths to original for display
-    resolved_to_original = {f.resolve(): f for f in md_files}
 
     for md_file_resolved in file_order:
         # Get original path for relative path calculation
@@ -447,31 +572,22 @@ def build_directory(
         # Calculate relative path from input directory
         relative_path = md_file.relative_to(input_path)
 
-        # Check if this file should be rerun based on path matching
-        file_should_rerun = rerun
-        if rerun_paths and not rerun:
-            # Check if this file matches any of the rerun paths
-            relative_str = str(relative_path)
-            for rpath in rerun_paths:
-                # Normalize rpath (remove trailing slash if present)
-                rpath_normalized = rpath.rstrip("/")
-
-                # Support both exact file matches and directory/subdirectory prefix matches
-                if relative_str == rpath_normalized or relative_str.startswith(
-                    rpath_normalized + "/"
-                ):
-                    file_should_rerun = True
-                    break
+        # Determine if this file should be rerun
+        # Only files matching --rerun-path will be rerun; all others use cache
+        rerun_reason = rerun_reasons.get(md_file_resolved, None)
+        file_should_rerun = rerun or (md_file_resolved in rerun_reasons)
 
         # Create corresponding output directory structure
         output_subdir = output / relative_path.parent
         output_subdir.mkdir(parents=True, exist_ok=True)
 
-        # Build the file
-        if file_should_rerun and not rerun:
-            click.echo(f"\nBuilding (rerun): {relative_path}")
+        # Build the file with clear indication of status
+        if rerun:
+            click.echo(f"\nBuilding (--rerun flag): {relative_path}")
+        elif rerun_reason:
+            click.echo(f"\nBuilding (rerun: {rerun_reason}): {relative_path}")
         else:
-            click.echo(f"\nBuilding: {relative_path}")
+            click.echo(f"\nBuilding (cached): {relative_path}")
 
         # Track for index generation
         parent_dir = str(relative_path.parent)
@@ -484,39 +600,39 @@ def build_directory(
             config, cells, cell_file_deps = file_infos[md_file_resolved]
             content = md_file.read_text()
 
-            if not cells:
-                click.echo(f"  Skipping {relative_path}: No Python code cells found")
-                continue
-
-            click.echo(f"  Found {len(cells)} code cells")
-
-            # Execute cells
+            # Execute cells if present
             work_dir = md_file.parent
+            results = []
 
-            # Calculate dependencies if needed
-            force_rerun_cells = None
-            if dependencies:
-                all_cell_ids = {cell.id for cell in cells}
-                force_rerun_cells = all_cell_ids
+            if cells:
+                click.echo(f"  Found {len(cells)} code cells")
 
-            # Build environment variables for file dependencies
-            file_env_vars = {}
-            if cell_file_deps:
-                file_env_vars = resolve_file_env_vars(
-                    md_file_resolved, cell_file_deps, built_files, all_files_cells
+                # Calculate dependencies if needed
+                force_rerun_cells = None
+                if dependencies:
+                    all_cell_ids = {cell.id for cell in cells}
+                    force_rerun_cells = all_cell_ids
+
+                # Build environment variables for file dependencies
+                file_env_vars = {}
+                if cell_file_deps:
+                    file_env_vars = resolve_file_env_vars(
+                        md_file_resolved, cell_file_deps, built_files, all_files_cells
+                    )
+
+                results = execute_cells(
+                    cells,
+                    work_dir,
+                    use_cache=not (no_cache or file_should_rerun),
+                    env_vars=file_env_vars,  # Pass file dependency env vars
+                    force_rerun_cells=force_rerun_cells,
+                    incremental_callback=None
+                    if not incremental
+                    else lambda r: None,  # Simplified for directory builds
+                    strict=strict,
                 )
-
-            results = execute_cells(
-                cells,
-                work_dir,
-                use_cache=not (no_cache or file_should_rerun),
-                env_vars=file_env_vars,  # Pass file dependency env vars
-                force_rerun_cells=force_rerun_cells,
-                incremental_callback=None
-                if not incremental
-                else lambda r: None,  # Simplified for directory builds
-                strict=strict,
-            )
+            else:
+                click.echo(f"  No code cells found (rendering as static HTML)")
 
             # Store results for dependent files (use resolved path as key)
             built_files[md_file_resolved] = results
@@ -607,16 +723,25 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 
     # Group files by directory
     dir_contents = {}
+    has_custom_index = set()  # Track directories with custom index.md
 
     for md_file in md_files:
         relative_path = md_file.relative_to(input_path)
         parent_dir = relative_path.parent
 
+        # Check if this is an index.md file
+        if md_file.name == "index.md":
+            dir_key = str(relative_path.parent) if str(relative_path.parent) != "." else ""
+            has_custom_index.add(dir_key)
+
         # Track this file in its parent directory
         parent_key = str(parent_dir) if str(parent_dir) != "." else ""
         if parent_key not in dir_contents:
             dir_contents[parent_key] = {"files": [], "subdirs": set()}
-        dir_contents[parent_key]["files"].append(relative_path.stem + ".html")
+
+        # Don't list index.html in the directory listing (it's the directory page itself)
+        if md_file.name != "index.md":
+            dir_contents[parent_key]["files"].append(relative_path.stem + ".html")
 
         # Track subdirectories
         parts = relative_path.parts
@@ -631,6 +756,11 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
     for dir_path, contents in dir_contents.items():
         output_dir = output / dir_path if dir_path else output
         index_file = output_dir / "index.html"
+
+        # Skip if this directory has a custom index.md
+        if dir_path in has_custom_index:
+            click.echo(f"  Using custom index: {index_file} (from index.md)")
+            continue
 
         # Determine if we should show back button (not at root)
         has_parent = bool(dir_path)
@@ -782,7 +912,12 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 @click.option(
     "--rerun-path",
     multiple=True,
-    help="Force rerun for files in specific path(s) only (can be used multiple times)",
+    help="Force rerun for files in specific path(s) and all files that depend on them",
+)
+@click.option(
+    "--rerun-isolated",
+    is_flag=True,
+    help="With --rerun-path, only rerun specified paths without cascading to dependent files",
 )
 @click.option(
     "--strict", is_flag=True, help="Stop building if any cell execution fails"
@@ -796,6 +931,7 @@ def build(
     incremental: bool,
     recursive: bool,
     rerun_path: tuple,
+    rerun_isolated: bool,
     strict: bool,
 ):
     """Build static HTML from markdown file or directory."""
@@ -813,6 +949,7 @@ def build(
             dependencies,
             incremental,
             rerun_path,
+            rerun_isolated,
             strict,
         )
 
