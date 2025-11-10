@@ -45,8 +45,12 @@
                 // For HTML files, navigate within iframe
                 if (fullPath.endsWith('.html') || fullPath.endsWith('/')) {
                     const pathParts = fullPath.split('/').filter(p => p);
-                    const targetFile = pathParts[pathParts.length - 1] || 'index.html';
-                    window.location.href = targetFile;
+                    // remove "#/" prefix if present
+                    let iframePath = fullPath;
+                    if (iframePath.startsWith('#/')) {
+                        iframePath = iframePath.slice(2);
+                    }
+                    window.location.href = "/" + iframePath;
                 } else {
                     // For non-HTML files (raw .py, etc), open directly
                     window.open(href, '_blank');
