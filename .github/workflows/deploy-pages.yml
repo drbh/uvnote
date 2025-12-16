@@ -77,16 +77,29 @@ jobs:
           name: site-macOS
           path: ./site-macos
 
-      - name: Consolidate sites
+      - name: Checkout (for uvnote aggregate)
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uvnote
         run: |
-          mkdir -p ./site
-          # Start with Linux site as base (has common files + linux-specific)
-          cp -r ./site-linux/* ./site/
-          # Merge macOS-specific files (won't overwrite existing common files)
-          cp -rn ./site-macos/* ./site/ 2>/dev/null || true
-          # List consolidated site
-          echo "=== Consolidated site contents ==="
-          find ./site -type f -name "*.html" | sort
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .
+
+      - name: Aggregate sites
+        run: |
+          source .venv/bin/activate
+          uvnote aggregate ./site-linux ./site-macos -o ./site
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

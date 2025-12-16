@@ -2299,5 +2299,234 @@ def export(file: str, cell: Optional[str], output: Optional[Path]):
     return 0
 
 
+def generate_aggregated_indexes(output_dir: Path):
+    """Generate index.html files for a directory of HTML files (post-aggregation)."""
+
+    # Find all HTML files (excluding index.html)
+    html_files = [
+        f for f in output_dir.rglob("*.html")
+        if f.name != "index.html"
+    ]
+
+    if not html_files:
+        click.echo("No HTML files found to index")
+        return
+
+    # Group files by directory
+    dir_contents: Dict[str, Dict] = {}
+
+    for html_file in html_files:
+        relative_path = html_file.relative_to(output_dir)
+        parent_dir = str(relative_path.parent) if str(relative_path.parent) != "." else ""
+
+        if parent_dir not in dir_contents:
+            dir_contents[parent_dir] = {"files": [], "subdirs": set()}
+
+        dir_contents[parent_dir]["files"].append(relative_path.name)
+
+        # Track subdirectories
+        parts = relative_path.parts
+        for i in range(len(parts) - 1):
+            current_dir = "/".join(parts[:i]) if i > 0 else ""
+            subdir = parts[i]
+            if current_dir not in dir_contents:
+                dir_contents[current_dir] = {"files": [], "subdirs": set()}
+            dir_contents[current_dir]["subdirs"].add(subdir)
+
+    # Generate index.html for each directory
+    for dir_path, contents in dir_contents.items():
+        output_subdir = output_dir / dir_path if dir_path else output_dir
+        index_file = output_subdir / "index.html"
+
+        has_parent = bool(dir_path)
+        parent_link = "../index.html" if has_parent else None
+
+        # Build file list items
+        file_items = []
+
+        # Add subdirectories
+        for subdir in sorted(contents["subdirs"]):
+            file_items.append(
+                f"    <li><a href='{subdir}/index.html' class='dir'>{subdir}/</a></li>"
+            )
+
+        # Add files with platform detection
+        for file in sorted(contents["files"]):
+            platform_badge = ""
+            if "linux" in file.lower():
+                platform_badge = " <span class='platform'>(Linux)</span>"
+            elif "macos" in file.lower() or "darwin" in file.lower():
+                platform_badge = " <span class='platform'>(macOS)</span>"
+            file_items.append(f"    <li><a href='{file}' class='file'>{file}{platform_badge}</a></li>")
+
+        # Build HTML
+        html_lines = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            "  <meta charset='UTF-8'>",
+            "  <meta name='viewport' content='width=device-width, initial-scale=1.0'>",
+            f"  <title>Index of /{dir_path or ''}</title>",
+            "  <style>",
+            "    :root {",
+            "      --bg-primary: #0a0a0a;",
+            "      --bg-secondary: #121212;",
+            "      --bg-tertiary: #181818;",
+            "      --text-primary: #e0e0e0;",
+            "      --text-secondary: #888888;",
+            "      --text-link: #64b5f6;",
+            "      --border-primary: #2a2a2a;",
+            "    }",
+            "    body {",
+            "      font-family: system-ui, -apple-system, sans-serif;",
+            "      background: var(--bg-primary);",
+            "      color: var(--text-primary);",
+            "      margin: 0;",
+            "      padding: 16px;",
+            "      max-width: 900px;",
+            "      margin: 0 auto;",
+            "    }",
+            "    .controls {",
+            "      display: flex;",
+            "      justify-content: flex-end;",
+            "      margin-bottom: 1rem;",
+            "    }",
+            "    .back-button {",
+            "      background: var(--bg-secondary);",
+            "      border: 1px solid var(--border-primary);",
+            "      padding: 8px 12px;",
+            "      border-radius: 4px;",
+            "      color: var(--text-secondary);",
+            "      cursor: pointer;",
+            "      font-size: 0.9rem;",
+            "      text-decoration: none;",
+            "    }",
+            "    .back-button:hover {",
+            "      color: var(--text-primary);",
+            "      background: var(--bg-tertiary);",
+            "    }",
+            "    h1 {",
+            "      font-size: 1.5em;",
+            "      margin: 1rem 0;",
+            "      border-bottom: 1px solid var(--border-primary);",
+            "      padding-bottom: 0.5rem;",
+            "    }",
+            "    ul { list-style-type: none; padding: 0; }",
+            "    li {",
+            "      margin: 0;",
+            "      border-bottom: 1px solid var(--border-primary);",
+            "    }",
+            "    li:last-child { border-bottom: none; }",
+            "    a {",
+            "      display: block;",
+            "      padding: 0.75rem 0.5rem;",
+            "      text-decoration: none;",
+            "      color: var(--text-link);",
+            "      transition: background 0.2s ease;",
+            "    }",
+            "    a:hover { background: var(--bg-secondary); }",
+            "    .dir { font-weight: 500; }",
+            "    .platform { color: var(--text-secondary); font-size: 0.85em; margin-left: 0.5em; }",
+            "  </style>",
+            "</head>",
+            "<body>",
+        ]
+
+        if has_parent:
+            html_lines.extend([
+                "  <div class='controls'>",
+                f"    <a href='{parent_link}' class='back-button'>← back</a>",
+                "  </div>",
+            ])
+
+        html_lines.append(f"  <h1>Index of /{dir_path or ''}</h1>")
+        html_lines.append("  <ul>")
+        html_lines.extend(file_items)
+        html_lines.extend([
+            "  </ul>",
+            "</body>",
+            "</html>",
+        ])
+
+        index_file.write_text("\n".join(html_lines))
+        click.echo(f"  Created index: {index_file}")
+
+
+@main.command()
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=Path("site"),
+    help="Output directory (default: site/)",
+)
+def aggregate(inputs: tuple, output: Path):
+    """Aggregate site outputs from multiple platforms into a single site.
+
+    This command merges HTML outputs from multiple platform-specific builds
+    into a single consolidated site with regenerated indexes.
+
+    Example:
+        uvnote aggregate site-linux site-darwin -o site
+    """
+    click.echo(f"=== Aggregating {len(inputs)} site directories ===")
+    click.echo(f"Output: {output}")
+    click.echo("")
+
+    # Clean and create output directory
+    if output.exists():
+        shutil.rmtree(output)
+    output.mkdir(parents=True, exist_ok=True)
+
+    # Track stats
+    total_files = 0
+    platforms_found = set()
+
+    # Copy files from each input directory
+    for input_dir in inputs:
+        input_path = Path(input_dir)
+        platform_name = input_path.name  # e.g., "site-linux" -> use as identifier
+
+        click.echo(f"Processing: {input_path}")
+
+        # Find all files (not just HTML, include cells/ etc.)
+        for src_file in input_path.rglob("*"):
+            if src_file.is_file() and src_file.name != "index.html":
+                relative_path = src_file.relative_to(input_path)
+                dst_file = output / relative_path
+
+                # Create parent directories
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # Copy if doesn't exist (first platform wins for common files)
+                if not dst_file.exists():
+                    shutil.copy2(src_file, dst_file)
+                    total_files += 1
+
+                    # Detect platform from filename
+                    if "linux" in src_file.name.lower():
+                        platforms_found.add("linux")
+                    elif "macos" in src_file.name.lower() or "darwin" in src_file.name.lower():
+                        platforms_found.add("darwin")
+
+    click.echo("")
+    click.echo(f"Copied {total_files} files")
+
+    # Regenerate indexes
+    click.echo("")
+    click.echo("Regenerating indexes...")
+    generate_aggregated_indexes(output)
+
+    # Summary
+    click.echo("")
+    click.echo("=== Aggregation complete ===")
+    html_count = len(list(output.rglob("*.html")))
+    click.echo(f"  Total HTML files: {html_count}")
+    if platforms_found:
+        click.echo(f"  Platforms: {', '.join(sorted(platforms_found))}")
+    click.echo(f"  Output: {output}")
+
+
 if __name__ == "__main__":
     main()
