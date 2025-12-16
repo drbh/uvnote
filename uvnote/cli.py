@@ -395,6 +395,7 @@ def build_directory(
     strict: bool,
 ) -> int:
     """Build all markdown files in a directory recursively."""
+    import platform as platform_module
 
     if output is None:
         output = Path("site")
@@ -436,6 +437,8 @@ def build_directory(
 
     file_infos = {}  # Path -> (config, cells, cell_file_deps)
     all_files_cells = {}  # Path -> cells (for validation)
+    skipped_platform = []  # Files skipped due to platform mismatch
+    current_platform = platform_module.system().lower()
 
     click.echo("\nPhase 1: Parsing files and resolving dependencies...")
     for md_file in md_files:
@@ -447,6 +450,16 @@ def build_directory(
                 content = f.read()
             config, cells = parse_markdown(content, source_file=md_file)
             validate_cells(cells)
+
+            # Check platform compatibility
+            if config.platforms is not None:
+                if current_platform not in config.platforms:
+                    click.echo(
+                        f"  Skipping {md_file.name}: requires platforms {config.platforms}, "
+                        f"but current platform is {current_platform}"
+                    )
+                    skipped_platform.append(md_file)
+                    continue
 
             # Resolve file dependencies for this file
             cell_file_deps = resolve_file_dependencies(
@@ -545,7 +558,9 @@ def build_directory(
                     rerun_reasons[md_file_resolved] = f"path match: {rpath}"
                     break
 
-        click.echo(f"  Files to rerun (matching --rerun-path): {len(path_matched_files)}")
+        click.echo(
+            f"  Files to rerun (matching --rerun-path): {len(path_matched_files)}"
+        )
         for f in path_matched_files:
             click.echo(f"    - {resolved_to_original.get(f, f).name}")
 
@@ -640,7 +655,10 @@ def build_directory(
             # Check for failures
             failed_cells = [r for r in results if not r.success]
             if failed_cells:
-                click.echo(f"\n  Warning: {len(failed_cells)} cells failed in {relative_path}", err=True)
+                click.echo(
+                    f"\n  Warning: {len(failed_cells)} cells failed in {relative_path}",
+                    err=True,
+                )
                 for result in failed_cells:
                     errors.append(f"{relative_path} - {result.cell_id}")
                     click.echo(f"\n  {'=' * 58}", err=True)
@@ -664,6 +682,7 @@ def build_directory(
                         err=True,
                     )
                     import sys
+
                     sys.exit(1)
 
             # Generate HTML
@@ -703,9 +722,15 @@ def build_directory(
 
     # Report summary
     click.echo(f"\n{'=' * 60}")
+    built_count = len(md_files) - len(errors) - len(skipped_platform)
     click.echo(
-        f"Build complete: {len(md_files) - len(errors)} succeeded, {len(errors)} failed"
+        f"Build complete: {built_count} succeeded, {len(errors)} failed, {len(skipped_platform)} skipped (platform)"
     )
+
+    if skipped_platform:
+        click.echo(f"\nSkipped files (platform mismatch):")
+        for skipped in skipped_platform:
+            click.echo(f"  - {skipped.relative_to(input_path)}")
 
     if errors:
         click.echo("\nFailed files:")
@@ -731,7 +756,9 @@ def generate_directory_indexes(input_path: Path, output: Path, md_files: List[Pa
 
         # Check if this is an index.md file
         if md_file.name == "index.md":
-            dir_key = str(relative_path.parent) if str(relative_path.parent) != "." else ""
+            dir_key = (
+                str(relative_path.parent) if str(relative_path.parent) != "." else ""
+            )
             has_custom_index.add(dir_key)
 
         # Track this file in its parent directory
@@ -978,6 +1005,18 @@ def build(
     except Exception as e:
         click.echo(f"Error parsing markdown: {e}", err=True)
         return 1
+
+    # Check platform compatibility
+    import platform as platform_module
+
+    if config.platforms is not None:
+        current_platform = platform_module.system().lower()
+        if current_platform not in config.platforms:
+            click.echo(
+                f"Skipping {resolved_file.name}: requires platforms {config.platforms}, "
+                f"but current platform is {current_platform}"
+            )
+            return 0
 
     if not cells:
         click.echo("No Python code cells found")
@@ -1254,6 +1293,18 @@ def run(
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         return 1
+
+    # Check platform compatibility
+    import platform as platform_module
+
+    if config.platforms is not None:
+        current_platform = platform_module.system().lower()
+        if current_platform not in config.platforms:
+            click.echo(
+                f"Skipping {resolved_file.name}: requires platforms {config.platforms}, "
+                f"but current platform is {current_platform}"
+            )
+            return 0
 
     if not cells:
         click.echo("No Python code cells found")
@@ -1700,7 +1751,9 @@ def clean(all: bool):
                         click.echo(f"Removed {rel_path}/")
                         removed_count += 1
                     except Exception as e:
-                        click.echo(f"Warning: Failed to remove {uvnote_dir}: {e}", err=True)
+                        click.echo(
+                            f"Warning: Failed to remove {uvnote_dir}: {e}", err=True
+                        )
 
             if removed_count == 0:
                 click.echo("No .uvnote directories found")
@@ -1779,6 +1832,8 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
     broadcaster = Broadcaster()
 
     def rebuild(cancel_event=None):
+        import platform as platform_module
+
         logger = get_logger("cli")
         logger.debug("!!!!!!!!!!!!!! Rebuilding...")
         click.echo(f"Rebuilding {resolved_file}...")
@@ -1787,6 +1842,16 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
                 content = f.read()
             config, cells = parse_markdown(content, source_file=resolved_file)
             validate_cells(cells)
+
+            # Check platform compatibility
+            if config.platforms is not None:
+                current_platform = platform_module.system().lower()
+                if current_platform not in config.platforms:
+                    logger.warning(
+                        f"Skipping rebuild: requires platforms {config.platforms}, "
+                        f"but current platform is {current_platform}"
+                    )
+                    return
 
             # Prepare initial results from cache or placeholders so nothing disappears
             from .executor import ExecutionResult, check_all_cells_staleness

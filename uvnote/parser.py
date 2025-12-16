@@ -28,6 +28,9 @@ class DocumentConfig:
     on_huggingface: Optional[str] = (
         None  # Hugging Face kernel path (e.g., "kernels-community/flash-attn2")
     )
+    platforms: Optional[List[str]] = (
+        None  # List of supported platforms: ["linux", "darwin"]
+    )
 
 
 @dataclass
@@ -161,6 +164,20 @@ def parse_frontmatter(content: str) -> Tuple[DocumentConfig, str]:
     if _widgets_value is None:
         _widgets_value = frontmatter_data.get("show_widgets")
 
+    # Parse platforms - support both string and list
+    _platforms_value = frontmatter_data.get("platforms")
+    if _platforms_value is None:
+        _platforms_value = frontmatter_data.get("platform")
+
+    # Normalize to list
+    if _platforms_value is not None:
+        if isinstance(_platforms_value, str):
+            _platforms_value = [_platforms_value]
+        elif isinstance(_platforms_value, list):
+            _platforms_value = [str(p).lower() for p in _platforms_value]
+        else:
+            _platforms_value = None
+
     config = DocumentConfig(
         title=frontmatter_data.get("title", ""),
         author=frontmatter_data.get("author", ""),
@@ -175,6 +192,7 @@ def parse_frontmatter(content: str) -> Tuple[DocumentConfig, str]:
         code_font_size=frontmatter_data.get("code_font_size"),
         on_github=frontmatter_data.get("on_github"),
         on_huggingface=frontmatter_data.get("on_huggingface"),
+        platforms=_platforms_value,
     )
 
     # Return remaining content
