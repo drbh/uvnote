@@ -2453,7 +2453,7 @@ def generate_aggregated_indexes(output_dir: Path):
 
 
 @main.command()
-@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(path_type=Path))
 @click.option(
     "--output",
     "-o",
@@ -2470,7 +2470,28 @@ def aggregate(inputs: tuple, output: Path):
     Example:
         uvnote aggregate site-linux site-darwin -o site
     """
-    click.echo(f"=== Aggregating {len(inputs)} site directories ===")
+    # Verify all input directories exist and have content
+    valid_inputs = []
+    for input_dir in inputs:
+        input_path = Path(input_dir)
+        if not input_path.exists():
+            click.echo(f"Warning: {input_path} does not exist, skipping", err=True)
+            continue
+        if not input_path.is_dir():
+            click.echo(f"Warning: {input_path} is not a directory, skipping", err=True)
+            continue
+        # Check if it has any HTML files
+        html_files = list(input_path.rglob("*.html"))
+        if not html_files:
+            click.echo(f"Warning: {input_path} has no HTML files, skipping", err=True)
+            continue
+        valid_inputs.append(input_path)
+
+    if not valid_inputs:
+        click.echo("Error: No valid input directories with HTML files found", err=True)
+        return 1
+
+    click.echo(f"Aggregating {len(valid_inputs)} site directories")
     click.echo(f"Output: {output}")
     click.echo("")
 
@@ -2484,10 +2505,7 @@ def aggregate(inputs: tuple, output: Path):
     platforms_found = set()
 
     # Copy files from each input directory
-    for input_dir in inputs:
-        input_path = Path(input_dir)
-        platform_name = input_path.name  # e.g., "site-linux" -> use as identifier
-
+    for input_path in valid_inputs:
         click.echo(f"Processing: {input_path}")
 
         # Find all files (not just HTML, include cells/ etc.)
@@ -2520,9 +2538,9 @@ def aggregate(inputs: tuple, output: Path):
 
     # Summary
     click.echo("")
-    click.echo("=== Aggregation complete ===")
+    click.echo("Aggregation complete")
     html_count = len(list(output.rglob("*.html")))
-    click.echo(f"  Total HTML files: {html_count}")
+    click.echo(f"  HTML files: {html_count}")
     if platforms_found:
         click.echo(f"  Platforms: {', '.join(sorted(platforms_found))}")
     click.echo(f"  Output: {output}")
