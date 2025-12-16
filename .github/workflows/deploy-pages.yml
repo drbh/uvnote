@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,46 +15,87 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+  # Build on each platform in parallel
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Install uvnote
         run: |
           uv venv
           source .venv/bin/activate
           uv pip install -e .
-      
+
       - name: Build site with uvnote
         run: |
           source .venv/bin/activate
           cd test-repo
           rm -rf .uvnote site/
-          uvnote build report.md
-      
+          # Build all markdown files - platform filtering happens automatically
+          uvnote build .
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-${{ runner.os }}
+          path: "./test-repo/site"
+          retention-days: 1
+
+  # Consolidate artifacts from all platforms and deploy
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site-Linux
+          path: ./site-linux
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site-macOS
+          path: ./site-macos
+
+      - name: Consolidate sites
+        run: |
+          mkdir -p ./site
+          # Start with Linux site as base (has common files + linux-specific)
+          cp -r ./site-linux/* ./site/
+          # Merge macOS-specific files (won't overwrite existing common files)
+          cp -rn ./site-macos/* ./site/ 2>/dev/null || true
+          # List consolidated site
+          echo "=== Consolidated site contents ==="
+          find ./site -type f -name "*.html" | sort
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
-      
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './test-repo/site'
-      
+          path: "./site"
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

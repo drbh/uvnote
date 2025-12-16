@@ -1,12 +1,20 @@
 """CLI commands for uvnote."""
 
 from __future__ import annotations
+import os
 import shutil
 import tempfile
 import time
 import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
+
+
+def get_current_platform() -> str:
+    """Get current platform, allowing override via UVNOTE_PLATFORM env var."""
+    import platform as platform_module
+
+    return os.environ.get("UVNOTE_PLATFORM", platform_module.system()).lower()
 
 import click
 import pathspec
@@ -395,8 +403,6 @@ def build_directory(
     strict: bool,
 ) -> int:
     """Build all markdown files in a directory recursively."""
-    import platform as platform_module
-
     if output is None:
         output = Path("site")
 
@@ -438,7 +444,7 @@ def build_directory(
     file_infos = {}  # Path -> (config, cells, cell_file_deps)
     all_files_cells = {}  # Path -> cells (for validation)
     skipped_platform = []  # Files skipped due to platform mismatch
-    current_platform = platform_module.system().lower()
+    current_platform = get_current_platform()
 
     click.echo("\nPhase 1: Parsing files and resolving dependencies...")
     for md_file in md_files:
@@ -716,9 +722,10 @@ def build_directory(
             click.echo(f"  Error building {relative_path}: {e}", err=True)
             errors.append(str(relative_path))
 
-    # Generate index files for each directory
+    # Generate index files for each directory (exclude skipped files)
     click.echo("\nGenerating directory index files...")
-    generate_directory_indexes(input_path, output, md_files)
+    built_md_files = [f for f in md_files if f not in skipped_platform]
+    generate_directory_indexes(input_path, output, built_md_files)
 
     # Report summary
     click.echo(f"\n{'=' * 60}")
@@ -1007,10 +1014,8 @@ def build(
         return 1
 
     # Check platform compatibility
-    import platform as platform_module
-
     if config.platforms is not None:
-        current_platform = platform_module.system().lower()
+        current_platform = get_current_platform()
         if current_platform not in config.platforms:
             click.echo(
                 f"Skipping {resolved_file.name}: requires platforms {config.platforms}, "
@@ -1295,10 +1300,8 @@ def run(
         return 1
 
     # Check platform compatibility
-    import platform as platform_module
-
     if config.platforms is not None:
-        current_platform = platform_module.system().lower()
+        current_platform = get_current_platform()
         if current_platform not in config.platforms:
             click.echo(
                 f"Skipping {resolved_file.name}: requires platforms {config.platforms}, "
@@ -1832,8 +1835,6 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
     broadcaster = Broadcaster()
 
     def rebuild(cancel_event=None):
-        import platform as platform_module
-
         logger = get_logger("cli")
         logger.debug("!!!!!!!!!!!!!! Rebuilding...")
         click.echo(f"Rebuilding {resolved_file}...")
@@ -1845,7 +1846,7 @@ def serve(file: str, output: Optional[Path], host: str, port: int, no_cache: boo
 
             # Check platform compatibility
             if config.platforms is not None:
-                current_platform = platform_module.system().lower()
+                current_platform = get_current_platform()
                 if current_platform not in config.platforms:
                     logger.warning(
                         f"Skipping rebuild: requires platforms {config.platforms}, "
